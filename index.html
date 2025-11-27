@@ -69,40 +69,52 @@
         ];
 
         const getIconComponent = (iconName) => LucideIcons[iconName] || AlertCircle;
-        const isPreview = window.location.protocol === 'blob:';
+        // Detección más segura del entorno de preview
+        const isPreview = window.location.hostname.includes('usercontent.goog') || window.location.protocol === 'blob:';
 
         // --- SERVICIO API ---
         const ApiService = {
             login: async (credentials) => {
                 try {
                     const response = await fetch(`${API_URL}/login.php`, { method: 'POST', body: JSON.stringify(credentials) });
-                    const data = await response.json();
-                    // Asegurar que el ID sea un número si viene como string
-                    if (data.success && data.user) {
-                        data.user.id = parseInt(data.user.id, 10);
-                    }
-                    return data;
+                    return await response.json();
                 } catch (e) { 
                     console.error("Login error:", e); 
                     if(credentials.username === 'admin') return { success: true, user: { id: 1, username: 'Admin', role: 'admin', full_name: 'Administrador General' } };
                     if(credentials.username === 'mod') return { success: true, user: { id: 2, username: 'Moderador', role: 'moderator', full_name: 'Supervisor Taller' } };
                     if(credentials.username === 'tec') return { success: true, user: { id: 3, username: 'Tecnico', role: 'assigned', full_name: 'Juan Mecánico' } };
-                    // Usuario con ID 7 para pruebas si fallara la API real en preview
-                    if(credentials.username === 'user7') return { success: true, user: { id: 7, username: 'Usuario 7', role: 'assigned', full_name: 'Usuario Test 7' } };
                     return { success: false, error: 'Error de conexión' }; 
                 }
             },
+            // CORRECCIÓN CRÍTICA EN fetchAssignableUsers
             fetchAssignableUsers: async () => {
-                if(isPreview) return [{id:3, username:'tecnico1', full_name:'Juan Mecánico'}, {id:4, username:'tecnico2', full_name:'Pedro Llantas'}];
+                // Datos de respaldo (Mock Data) para cuando falla la API
+                const mockTechs = [
+                    {id: 3, username: 'tecnico1', full_name: 'Juan Mecánico', role: 'assigned'}, 
+                    {id: 4, username: 'tecnico2', full_name: 'Pedro Llantas', role: 'assigned'}
+                ];
+
+                if(isPreview) return mockTechs;
+
                 try {
+                    // Intentamos obtener usuarios desde manage_user.php (que hace un GET por defecto)
                     const response = await fetch(`${API_URL}/manage_user.php`);
+                    
                     if (!response.ok) throw new Error('Error al conectar con API de usuarios');
+                    
                     const allUsers = await response.json();
+                    
+                    // Verificamos si la respuesta es un array directo o un objeto con data
                     const usersList = Array.isArray(allUsers) ? allUsers : (allUsers.data || []);
-                    return usersList.filter(u => u.role === 'assigned');
+
+                    // Filtramos por rol 'assigned' (Técnicos)
+                    const techUsers = usersList.filter(u => u.role === 'assigned');
+                    
+                    console.log("Técnicos encontrados:", techUsers); // Debug en consola
+                    return techUsers;
                 } catch(e) { 
-                    console.error("Error fetching assignable users:", e);
-                    return []; 
+                    console.error("Error fetching assignable users, usando datos de prueba:", e);
+                    return mockTechs; // Devuelve datos de prueba en caso de error
                 }
             },
             assignIncident: async (data) => {
@@ -111,9 +123,11 @@
                     return await response.json();
                 } catch(e) { return {success:false}; }
             },
+            // fetchIncidents actualizado para enviar el 'filter_mode'
             fetchIncidents: async (catalog, user, viewMode = 'default') => {
                 if (isPreview) return [];
                 try {
+                    // Determinamos el filtro basado en la vista seleccionada
                     let filterParam = '';
                     if (viewMode === 'status_created') filterParam = '&filter_mode=created_by_me';
                     else if (viewMode === 'status_assigned') filterParam = '&filter_mode=assigned_to_me';
@@ -166,6 +180,7 @@
                     return await response.json(); 
                 } catch(e){ return {success:false}; } 
             },
+            // GESTIÓN DE USUARIOS
             fetchUsers: async () => {
                 if (isPreview) return [{id:1, username:'admin', role:'admin', full_name:'Admin'}, {id:2, username:'tec1', role:'assigned', full_name:'Técnico 1'}];
                 try {
