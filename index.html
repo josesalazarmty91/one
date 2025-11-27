@@ -55,7 +55,7 @@
             Settings, BarChart3, AlertCircle, X, Save,
             ArrowLeft, Wrench, Shield, Search, Home, LayoutGrid,
             Filter, MessageSquare, Calendar, Maximize, Minimize, 
-            List, Grid, FolderPlus, Tag, UserCheck, Lock, Briefcase
+            List, Grid, FolderPlus, Tag, UserCheck, Lock, Briefcase, Users, Trash2, FilePlus
         } from 'lucide-react';
 
         // --- CONFIGURACIÓN ---
@@ -76,20 +76,34 @@
             login: async (credentials) => {
                 try {
                     const response = await fetch(`${API_URL}/login.php`, { method: 'POST', body: JSON.stringify(credentials) });
-                    return await response.json();
+                    const data = await response.json();
+                    // Asegurar que el ID sea un número si viene como string
+                    if (data.success && data.user) {
+                        data.user.id = parseInt(data.user.id, 10);
+                    }
+                    return data;
                 } catch (e) { 
                     console.error("Login error:", e); 
                     if(credentials.username === 'admin') return { success: true, user: { id: 1, username: 'Admin', role: 'admin', full_name: 'Administrador General' } };
                     if(credentials.username === 'mod') return { success: true, user: { id: 2, username: 'Moderador', role: 'moderator', full_name: 'Supervisor Taller' } };
                     if(credentials.username === 'tec') return { success: true, user: { id: 3, username: 'Tecnico', role: 'assigned', full_name: 'Juan Mecánico' } };
+                    // Usuario con ID 7 para pruebas si fallara la API real en preview
+                    if(credentials.username === 'user7') return { success: true, user: { id: 7, username: 'Usuario 7', role: 'assigned', full_name: 'Usuario Test 7' } };
                     return { success: false, error: 'Error de conexión' }; 
                 }
             },
             fetchAssignableUsers: async () => {
+                if(isPreview) return [{id:3, username:'tecnico1', full_name:'Juan Mecánico'}, {id:4, username:'tecnico2', full_name:'Pedro Llantas'}];
                 try {
-                    const response = await fetch(`${API_URL}/get_users_by_role.php`);
-                    return await response.json();
-                } catch(e) { return [{id:3, username:'Técnico A'}, {id:4, username:'Técnico B'}]; }
+                    const response = await fetch(`${API_URL}/manage_user.php`);
+                    if (!response.ok) throw new Error('Error al conectar con API de usuarios');
+                    const allUsers = await response.json();
+                    const usersList = Array.isArray(allUsers) ? allUsers : (allUsers.data || []);
+                    return usersList.filter(u => u.role === 'assigned');
+                } catch(e) { 
+                    console.error("Error fetching assignable users:", e);
+                    return []; 
+                }
             },
             assignIncident: async (data) => {
                 try {
@@ -97,11 +111,14 @@
                     return await response.json();
                 } catch(e) { return {success:false}; }
             },
-            fetchIncidents: async (catalog, user) => {
+            fetchIncidents: async (catalog, user, viewMode = 'default') => {
                 if (isPreview) return [];
                 try {
-                    // IMPORTANTE: Pasamos user_id y role para que el PHP filtre
-                    const response = await fetch(`${API_URL}/get_incidents.php?user_id=${user.id}&role=${user.role}`);
+                    let filterParam = '';
+                    if (viewMode === 'status_created') filterParam = '&filter_mode=created_by_me';
+                    else if (viewMode === 'status_assigned') filterParam = '&filter_mode=assigned_to_me';
+                    
+                    const response = await fetch(`${API_URL}/get_incidents.php?user_id=${user.id}&role=${user.role}${filterParam}`);
                     const data = await response.json();
                     return Array.isArray(data) ? data.map(ticket => {
                         const catData = catalog.find(c => c.id == ticket.category_id);
@@ -138,6 +155,7 @@
             },
             createIncident: async (data) => { 
                 try { 
+                    console.log("Enviando reporte a API:", data); // Debug para ver qué enviamos
                     const response = await fetch(`${API_URL}/create_incident.php`, {method:'POST', body:JSON.stringify(data)}); 
                     return await response.json(); 
                 } catch(e){ return {success:false}; } 
@@ -147,12 +165,35 @@
                     const response = await fetch(`${API_URL}/update_incident.php`, {method:'POST', body:JSON.stringify({id, status, note})}); 
                     return await response.json(); 
                 } catch(e){ return {success:false}; } 
-            }
+            },
+            fetchUsers: async () => {
+                if (isPreview) return [{id:1, username:'admin', role:'admin', full_name:'Admin'}, {id:2, username:'tec1', role:'assigned', full_name:'Técnico 1'}];
+                try {
+                    const response = await fetch(`${API_URL}/manage_user.php`);
+                    return await response.json();
+                } catch(e) { return []; }
+            },
+            createUser: async (userData) => {
+                if (isPreview) { console.log("Crear usuario:", userData); return {success:true}; }
+                try {
+                    const response = await fetch(`${API_URL}/manage_user.php`, { method: 'POST', body: JSON.stringify(userData) });
+                    return await response.json();
+                } catch(e) { return {success:false, error:e.message}; }
+            },
+            deleteUser: async (id) => {
+                if (isPreview) return {success:true};
+                try {
+                    const response = await fetch(`${API_URL}/manage_user.php`, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ action: 'delete', id: id }) 
+                    });
+                    return await response.json();
+                } catch(e) { return {success:false}; }
+            },
         };
 
         // --- COMPONENTES UI ---
 
-        // 1. HEADER MEJORADO (Más grande y bonito)
         const Header = ({ title, subtitle, onBack, showHome = true, onHome, user, onLogout }) => {
             const [isFullscreen, setIsFullscreen] = useState(false);
             const toggleFullscreen = () => {
@@ -161,7 +202,6 @@
                 setIsFullscreen(!document.fullscreenElement);
             };
 
-            // Mapeo de roles a nombres amigables
             const roleLabels = {
                 'admin': 'Administrador',
                 'moderator': 'Moderador',
@@ -172,8 +212,6 @@
             return (
                 <header className="bg-gradient-to-r from-[#084b9a] to-[#063d80] text-white shadow-lg sticky top-0 z-50 transition-all duration-300">
                     <div className="max-w-7xl mx-auto flex justify-between items-center px-4 py-4 md:py-5">
-                        
-                        {/* Izquierda: Logo y Título */}
                         <div className="flex items-center gap-4">
                             {onBack ? (
                                 <button onClick={onBack} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors backdrop-blur-sm">
@@ -184,36 +222,28 @@
                                     <Truck className="w-8 h-8 text-white" />
                                 </div>
                             )}
-                            
                             <div>
                                 <h1 className="font-black text-xl md:text-2xl leading-none tracking-tight">{title || 'AM6 Diesel'}</h1>
                                 <p className="text-xs md:text-sm text-blue-200 font-medium mt-0.5">{subtitle || 'Sistema de Reportes'}</p>
                             </div>
                         </div>
-
-                        {/* Derecha: Perfil y Acciones */}
                         <div className="flex items-center gap-3 md:gap-5">
-                            {/* Info Usuario (Desktop) */}
                             <div className="hidden md:flex flex-col items-end">
                                 <span className="text-sm font-bold text-white">{user?.full_name || user?.username}</span>
                                 <span className="text-[10px] bg-[#f5851f] text-white px-2 py-0.5 rounded-full font-black uppercase tracking-wide shadow-sm">
                                     {roleLabels[user?.role] || user?.role}
                                 </span>
                             </div>
-
                             <div className="flex items-center bg-white/10 rounded-full p-1 backdrop-blur-md border border-white/10">
                                 <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full text-blue-100 hover:text-white transition-colors" title="Pantalla Completa">
                                     {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
                                 </button>
-                                
                                 {showHome && (
                                     <button onClick={onHome} className="p-2 hover:bg-white/20 rounded-full text-blue-100 hover:text-white transition-colors" title="Inicio">
                                         <Home size={20} />
                                     </button>
                                 )}
-                                
                                 <div className="w-px h-6 bg-white/20 mx-1"></div>
-
                                 <button onClick={onLogout} className="p-2 hover:bg-red-500/80 rounded-full text-blue-100 hover:text-white transition-colors" title="Cerrar Sesión">
                                     <LogOut size={20} />
                                 </button>
@@ -277,7 +307,6 @@
             );
         };
 
-        // Componente Select Buscable
         const SearchableSelect = ({ options, value, onChange, placeholder }) => {
             const [isOpen, setIsOpen] = useState(false);
             const [searchTerm, setSearchTerm] = useState('');
@@ -312,26 +341,36 @@
 
         // --- PANTALLAS INTERNAS ---
 
-        const AdminMenu = ({ onNavigate }) => (
-            <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn p-4 md:p-8 items-center justify-center">
-                <div className="text-center mb-8">
-                    <h2 className="text-3xl font-black text-[#084b9a] mb-2">Panel de Control</h2>
-                    <p className="text-gray-500">Selecciona una herramienta de gestión</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl w-full">
-                    <button onClick={() => onNavigate('admin_dashboard')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#0b4d9a] transition-all group flex flex-col items-center text-center relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="bg-blue-100 p-6 rounded-full text-[#0b4d9a] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><List size={48} /></div>
-                        <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Gestión de Reportes</h3>
-                        <p className="text-[#87898d] mt-2 relative z-10">Ver tablero global, asignar técnicos y cerrar tickets.</p>
-                    </button>
-                    
-                    <button onClick={() => onNavigate('admin_catalog')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#f5851f] transition-all group flex flex-col items-center text-center relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-br from-orange-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="bg-orange-100 p-6 rounded-full text-[#f5851f] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><Grid size={48} /></div>
-                        <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Configurar Catálogos</h3>
-                        <p className="text-[#87898d] mt-2 relative z-10">Agregar nuevas categorías, fallas y parámetros del sistema.</p>
-                    </button>
+        const AdminMenu = ({ onNavigate, user, onLogout }) => (
+            <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
+                <Header title="Panel de Control" subtitle="Administración" onBack={() => onNavigate('menu')} user={user} onLogout={onLogout} />
+                <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 animate-fadeIn">
+                    <div className="text-center mb-8">
+                        <h2 className="text-3xl font-black text-[#084b9a] mb-2">Herramientas de Gestión</h2>
+                        <p className="text-gray-500">Selecciona el módulo que deseas administrar</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl w-full">
+                        <button onClick={() => onNavigate('admin_dashboard')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#0b4d9a] transition-all group flex flex-col items-center text-center relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="bg-blue-100 p-6 rounded-full text-[#0b4d9a] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><List size={48} /></div>
+                            <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Gestión de Reportes</h3>
+                            <p className="text-[#87898d] mt-2 text-sm relative z-10">Tablero de control y asignación</p>
+                        </button>
+                        
+                        <button onClick={() => onNavigate('admin_users')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-green-500 transition-all group flex flex-col items-center text-center relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-green-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="bg-green-100 p-6 rounded-full text-green-600 mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><Users size={48} /></div>
+                            <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Usuarios</h3>
+                            <p className="text-[#87898d] mt-2 text-sm relative z-10">Altas, bajas y roles</p>
+                        </button>
+
+                        <button onClick={() => onNavigate('admin_catalog')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#f5851f] transition-all group flex flex-col items-center text-center relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-orange-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="bg-orange-100 p-6 rounded-full text-[#f5851f] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><Grid size={48} /></div>
+                            <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Catálogos</h3>
+                            <p className="text-[#87898d] mt-2 text-sm relative z-10">Configurar fallas y sistemas</p>
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -340,7 +379,12 @@
             // Lógica de visualización según Rol
             const isTech = user.role === 'assigned';
             const isCreator = user.role === 'creator';
-            const isAdminOrMod = user.role === 'admin' || user.role === 'moderator';
+            const isAdmin = user.role === 'admin';
+            const isModerator = user.role === 'moderator';
+            
+            // Permisos combinados
+            const canAssign = isAdmin || isModerator;
+            const canAdminSystem = isAdmin; 
 
             return (
                 <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
@@ -351,7 +395,7 @@
                             <p className="text-gray-500 text-lg">¿Qué deseas hacer hoy?</p>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 w-full max-w-7xl">
                             {/* 1. Crear Reporte (TODOS) */}
                             <button onClick={() => onNavigate('create')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-[#0b4d9a] flex flex-col items-center text-center group transition-all duration-300">
                                 <div className="bg-[#0b4d9a] p-5 rounded-2xl text-white mb-6 group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-lg shadow-blue-200"><Plus size={40}/></div>
@@ -359,25 +403,32 @@
                                 <p className="text-gray-400">Generar reporte de falla</p>
                             </button>
 
-                            {/* 2. Estatus (VARÍA SEGÚN ROL) */}
-                            <button onClick={() => onNavigate('status')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-[#f5851f] flex flex-col items-center text-center group transition-all duration-300">
-                                <div className="bg-[#f5851f] p-5 rounded-2xl text-white mb-6 group-hover:scale-110 group-hover:-rotate-3 transition-transform shadow-lg shadow-orange-200">
-                                    {isAdminOrMod ? <Search size={40}/> : <Briefcase size={40}/>}
-                                </div>
-                                <h3 className="text-2xl font-bold text-[#084b9a] mb-2">
-                                    {isAdminOrMod ? 'Buscador Global' : (isTech ? 'Mis Tareas' : 'Mis Reportes')}
-                                </h3>
-                                <p className="text-gray-400">
-                                    {isAdminOrMod ? 'Consultar todo el historial' : (isTech ? 'Reportes asignados a mí' : 'Historial de mis solicitudes')}
-                                </p>
+                            {/* 2. Mis Reportes (TODOS - Ver lo que yo cree) */}
+                            <button onClick={() => onNavigate('status_created')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-[#f5851f] flex flex-col items-center text-center group transition-all duration-300">
+                                <div className="bg-[#f5851f] p-5 rounded-2xl text-white mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-orange-200"><FilePlus size={40}/></div>
+                                <h3 className="text-2xl font-bold text-[#084b9a] mb-2">Mis Reportes</h3>
+                                <p className="text-gray-400">Historial de mis solicitudes</p>
                             </button>
 
-                            {/* 3. Administración (SOLO ADMIN/MOD) */}
-                            {isAdminOrMod && (
+                            {/* 3. Mis Tareas / Gestión (SOLO SI TIENE PERMISO O ES TECNICO) */}
+                            {(isTech || canAssign) && (
+                                <button onClick={() => onNavigate('status_assigned')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-green-600 flex flex-col items-center text-center group transition-all duration-300">
+                                    <div className="bg-green-600 p-5 rounded-2xl text-white mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-green-200"><Briefcase size={40}/></div>
+                                    <h3 className="text-2xl font-bold text-[#084b9a] mb-2">
+                                        {canAssign ? 'Bandeja Global' : 'Mis Tareas'}
+                                    </h3>
+                                    <p className="text-gray-400">
+                                        {canAssign ? 'Supervisar y asignar' : 'Reportes asignados a mí'}
+                                    </p>
+                                </button>
+                            )}
+
+                            {/* 4. Administración (SOLO ADMIN) */}
+                            {isAdmin && (
                                 <button onClick={() => onNavigate('admin_menu')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-gray-600 flex flex-col items-center text-center group transition-all duration-300">
                                     <div className="bg-gray-700 p-5 rounded-2xl text-white mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-gray-300"><Shield size={40}/></div>
                                     <h3 className="text-2xl font-bold text-[#084b9a] mb-2">Administración</h3>
-                                    <p className="text-gray-400">Panel de control y ajustes</p>
+                                    <p className="text-gray-400">Panel de control</p>
                                 </button>
                             )}
                         </div>
@@ -386,8 +437,7 @@
             );
         };
 
-        // --- Componentes de Configuración y Flujo (Iguales pero integrados) ---
-        const CatalogConfig = ({ catalog, onReload }) => {
+        const CatalogConfig = ({ catalog, onReload, user, onLogout, onBack }) => {
             const [newCatName, setNewCatName] = useState('');
             const [selectedCat, setSelectedCat] = useState(null);
             const [newSubName, setNewSubName] = useState('');
@@ -404,70 +454,199 @@
             };
 
             return (
-                <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn p-4 max-w-6xl mx-auto w-full">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
-                        <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
-                            <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><FolderPlus size={24} /> Categorías Principales</div>
-                            <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
-                                <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-[#0b4d9a]" placeholder="Nueva Categoría..." value={newCatName} onChange={e => setNewCatName(e.target.value)} />
-                                <button onClick={handleAddCategory} className="bg-[#0b4d9a] hover:bg-[#063d80] text-white p-3 rounded-xl transition-colors"><Plus /></button>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
-                                {catalog.map(cat => (
-                                    <div key={cat.id} onClick={() => setSelectedCat(cat)} className={`p-4 rounded-2xl flex items-center gap-4 cursor-pointer border-2 transition-all ${selectedCat?.id === cat.id ? 'bg-white border-[#0b4d9a] text-[#0b4d9a] shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}>
-                                        <div className={`p-2 rounded-lg ${selectedCat?.id === cat.id ? 'bg-blue-50' : 'bg-gray-100'}`}><cat.icon size={24} /></div><span className="font-bold text-lg">{cat.label}</span><ChevronRight className="ml-auto text-gray-300" />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
-                            <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><Tag size={24} /> Fallas / Subcategorías</div>
-                            {selectedCat ? (
-                                <>
-                                    <div className="p-4 border-b border-[#e5e7eb] bg-blue-50 flex items-center gap-2 text-[#0b4d9a]">
-                                        <span className="text-xs uppercase font-bold bg-white/50 px-2 py-1 rounded">Editando:</span>
-                                        <span className="font-black">{selectedCat.label}</span>
-                                    </div>
-                                    <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
-                                        <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-[#f5851f]" placeholder="Nueva Falla..." value={newSubName} onChange={e => setNewSubName(e.target.value)} />
-                                        <button onClick={handleAddSubcategory} className="bg-[#f5851f] hover:bg-[#d97317] text-white p-3 rounded-xl transition-colors"><Plus /></button>
-                                    </div>
-                                    <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
-                                        {selectedCat.subcategories.length > 0 ? selectedCat.subcategories.map(sub => (
-                                            <div key={sub.id} className="p-4 rounded-2xl flex items-center gap-4 border border-[#e5e7eb] bg-white shadow-sm">
-                                                <span className="text-2xl">{sub.icon}</span><span className="font-medium text-gray-600">{sub.label}</span>
-                                            </div>
-                                        )) : <div className="flex flex-col items-center justify-center h-40 text-gray-400"><Grid size={32} className="mb-2 opacity-20"/><p>No hay fallas registradas.</p></div>}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-10 text-center bg-gray-50/50">
-                                    <div className="bg-white p-6 rounded-full shadow-sm mb-4"><ArrowLeft size={40} className="opacity-30" /></div>
-                                    <p className="font-medium">Selecciona una categoría de la izquierda<br/>para gestionar sus fallas.</p>
+                <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
+                    <Header title="Configuración" subtitle="Catálogos" onBack={onBack} user={user} onLogout={onLogout} showHome={false} />
+                    <div className="flex-1 p-4 max-w-6xl mx-auto w-full animate-fadeIn">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
+                            <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden h-[calc(100vh-140px)]">
+                                <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><FolderPlus size={24} /> Categorías Principales</div>
+                                <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
+                                    <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 outline-none focus:border-[#0b4d9a]" placeholder="Nueva..." value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+                                    <button onClick={handleAddCategory} className="bg-[#0b4d9a] text-white p-3 rounded-xl"><Plus /></button>
                                 </div>
-                            )}
+                                <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
+                                    {catalog.map(cat => (
+                                        <div key={cat.id} onClick={() => setSelectedCat(cat)} className={`p-4 rounded-2xl flex items-center gap-4 cursor-pointer border-2 transition-all ${selectedCat?.id === cat.id ? 'bg-white border-[#0b4d9a] text-[#0b4d9a] shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}>
+                                            <div className={`p-2 rounded-lg ${selectedCat?.id === cat.id ? 'bg-blue-50' : 'bg-gray-100'}`}><cat.icon size={24} /></div><span className="font-bold text-lg">{cat.label}</span><ChevronRight className="ml-auto text-gray-300" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden h-[calc(100vh-140px)]">
+                                <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><Tag size={24} /> Fallas</div>
+                                {selectedCat ? (
+                                    <>
+                                        <div className="p-4 border-b border-[#e5e7eb] bg-blue-50 flex items-center gap-2 text-[#0b4d9a]">
+                                            <span className="text-xs uppercase font-bold bg-white/50 px-2 py-1 rounded">Editando:</span>
+                                            <span className="font-black">{selectedCat.label}</span>
+                                        </div>
+                                        <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
+                                            <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 outline-none focus:border-[#f5851f]" placeholder="Nueva Falla..." value={newSubName} onChange={e => setNewSubName(e.target.value)} />
+                                            <button onClick={handleAddSubcategory} className="bg-[#f5851f] hover:bg-[#d97317] text-white p-3 rounded-xl transition-colors"><Plus /></button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
+                                            {selectedCat.subcategories.length > 0 ? selectedCat.subcategories.map(sub => (
+                                                <div key={sub.id} className="p-4 rounded-2xl flex items-center gap-4 border border-[#e5e7eb] bg-white shadow-sm">
+                                                    <span className="text-2xl">{sub.icon}</span><span className="font-medium text-gray-600">{sub.label}</span>
+                                                </div>
+                                            )) : <div className="flex flex-col items-center justify-center h-40 text-gray-400"><Grid size={32} className="mb-2 opacity-20"/><p>No hay fallas registradas.</p></div>}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-10 text-center bg-gray-50/50">
+                                        <div className="bg-white p-6 rounded-full shadow-sm mb-4"><ArrowLeft size={40} className="opacity-30" /></div>
+                                        <p className="font-medium">Selecciona una categoría de la izquierda<br/>para gestionar sus fallas.</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             );
         };
 
+        const UserManagement = ({ onBack, user, onLogout }) => {
+            const [users, setUsers] = useState([]);
+            const [showModal, setShowModal] = useState(false);
+            const [newUser, setNewUser] = useState({ username: '', password: '', role: 'creator', full_name: '' });
+
+            useEffect(() => { loadUsers(); }, []);
+
+            const loadUsers = async () => {
+                const data = await ApiService.fetchUsers();
+                setUsers(data);
+            };
+
+            const handleDelete = async (id) => {
+                if(confirm('¿Estás seguro de eliminar este usuario?')) {
+                    await ApiService.deleteUser(id);
+                    loadUsers();
+                }
+            };
+
+            const handleCreate = async () => {
+                if(!newUser.username || !newUser.password) return;
+                const res = await ApiService.createUser(newUser);
+                if(res.success) {
+                    setShowModal(false);
+                    setNewUser({ username: '', password: '', role: 'creator', full_name: '' });
+                    loadUsers();
+                } else {
+                    alert('Error: ' + (res.error || 'No se pudo crear'));
+                }
+            };
+
+            const roleBadges = {
+                'admin': 'bg-purple-100 text-purple-700 border-purple-200',
+                'moderator': 'bg-blue-100 text-blue-700 border-blue-200',
+                'assigned': 'bg-green-100 text-green-700 border-green-200',
+                'creator': 'bg-gray-100 text-gray-700 border-gray-200'
+            };
+
+            return (
+                <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
+                    <Header title="Gestión de Usuarios" subtitle="Administración" onBack={onBack} user={user} onLogout={onLogout} showHome={false} />
+                    <div className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full animate-fadeIn">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-3xl font-black text-[#084b9a]">Usuarios del Sistema</h2>
+                            <button onClick={() => setShowModal(true)} className="bg-[#0b4d9a] hover:bg-[#063d80] text-white px-6 py-3 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-all">
+                                <Plus size={20} /> Nuevo Usuario
+                            </button>
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-sm border border-[#e5e7eb] overflow-hidden flex-1">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                        <tr>
+                                            <th className="p-4 text-sm font-bold text-gray-500 uppercase">Usuario</th>
+                                            <th className="p-4 text-sm font-bold text-gray-500 uppercase">Nombre Completo</th>
+                                            <th className="p-4 text-sm font-bold text-gray-500 uppercase">Rol</th>
+                                            <th className="p-4 text-sm font-bold text-gray-500 uppercase">Registro</th>
+                                            <th className="p-4 text-sm font-bold text-gray-500 uppercase text-right">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {users.map(u => (
+                                            <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                                                <td className="p-4 font-bold text-[#084b9a]">{u.username}</td>
+                                                <td className="p-4 text-gray-600">{u.full_name || '-'}</td>
+                                                <td className="p-4">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase border ${roleBadges[u.role]}`}>
+                                                        {u.role}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-sm text-gray-400">{u.created_at?.substring(0,10)}</td>
+                                                <td className="p-4 text-right">
+                                                    <button onClick={() => handleDelete(u.id)} className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors">
+                                                        <Trash2 size={18} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* MODAL DE CREACIÓN */}
+                        {showModal && (
+                            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+                                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                                        <h3 className="text-xl font-bold text-[#084b9a]">Registrar Usuario</h3>
+                                        <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+                                    </div>
+                                    <div className="p-6 space-y-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Usuario (Login)</label>
+                                            <input type="text" className="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-[#0b4d9a] outline-none" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Nombre Completo</label>
+                                            <input type="text" className="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-[#0b4d9a] outline-none" value={newUser.full_name} onChange={e => setNewUser({...newUser, full_name: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Contraseña</label>
+                                            <input type="password" className="w-full p-3 border-2 border-gray-200 rounded-xl focus:border-[#0b4d9a] outline-none" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Rol / Permisos</label>
+                                            <select className="w-full p-3 border-2 border-gray-200 rounded-xl bg-white focus:border-[#0b4d9a] outline-none" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
+                                                <option value="creator">Operador (Solo Reportar)</option>
+                                                <option value="assigned">Técnico (Recibe Tareas)</option>
+                                                <option value="moderator">Moderador (Asigna Tareas)</option>
+                                                <option value="admin">Administrador (Control Total)</option>
+                                            </select>
+                                        </div>
+                                        <button onClick={handleCreate} className="w-full bg-[#0b4d9a] text-white font-bold py-4 rounded-xl shadow-lg hover:bg-[#063d80] mt-4">Guardar Usuario</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
         // CreateTicket, TicketDetail y Dashboard (Reutilizados del código previo con mejoras de estilo si aplica)
-        const CreateTicket = ({ onCancel, onSubmit, catalogs, incidentCatalog, user }) => {
+        const CreateTicket = ({ onCancel, onSubmit, catalogs, incidentCatalog, user, onLogout }) => {
             const [step, setStep] = useState(1);
             const [formData, setFormData] = useState({ unitId: '', companyId: '', category: null, subcategory: null, priority: 'normal', notes: '' });
             const handleUnitChange = (unitId) => { const unit = catalogs.units.find(u => u.id == unitId); setFormData({ ...formData, unitId, companyId: unit ? unit.company_id : '' }); };
             const unitOptions = catalogs.units.map(u => ({ value: u.id, label: u.unit_number }));
             const handleSubmit = () => {
+                // CORRECCIÓN: Usamos user.id asegurándonos que sea un entero
+                const userIdInt = parseInt(user.id, 10);
                 onSubmit({
                     unit_id: formData.unitId, company_id: formData.companyId, category_id: formData.category?.id, subcategory_id: formData.subcategory?.id, priority: formData.priority, notes: formData.notes,
-                    operator_id: 0, created_by: user.id 
+                    operator_id: 0, created_by: userIdInt 
                 });
             };
             
             return (
                 <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                    <Header title="Nuevo Reporte" subtitle="Asistente" onBack={onCancel} showHome={false} user={user} />
+                    <Header title="Nuevo Reporte" subtitle="Asistente" onBack={onCancel} showHome={false} user={user} onLogout={onLogout} />
                     <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col p-4">
                         <div className="bg-white rounded-[2rem] shadow-sm border border-[#e5e7eb] flex-1 overflow-hidden flex flex-col">
                             <div className="flex-1 overflow-y-auto p-6 md:p-8">
@@ -564,6 +743,8 @@
                                     <div>
                                         <div className="flex items-center gap-3 mb-2"><span className="bg-[#0b4d9a] text-white px-3 py-1 rounded-lg font-black text-2xl shadow-sm">{ticket.unitNumber}</span> <span className="font-bold text-gray-500 text-lg">{ticket.companyName}</span></div>
                                         <div className="text-gray-400 text-sm font-medium flex items-center gap-2"><Calendar size={14}/> {ticket.created_at?.substring(0,16)}</div>
+                                        {/* NUEVO: Mostrar creador del reporte */}
+                                        <div className="text-[#0b4d9a] text-sm font-bold mt-1">Reportado por: {ticket.creator_fullname || ticket.creator_username || 'Desconocido'}</div>
                                     </div>
                                     <div className={`px-4 py-2 rounded-xl text-sm font-black uppercase tracking-wide border-2 ${ticket.status==='abierto'?'bg-red-50 text-red-500 border-red-100':'bg-green-50 text-green-600 border-green-100'}`}>{ticket.status}</div>
                                 </div>
@@ -587,7 +768,14 @@
                                         <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Asignar Técnico</label>
                                         <select className="w-full p-4 border-2 border-gray-200 rounded-xl bg-gray-50 font-medium focus:border-[#0b4d9a] outline-none transition-colors" value={assignTo} onChange={e=>setAssignTo(e.target.value)}>
                                             <option value="">-- Seleccionar Técnico --</option>
-                                            {assignableUsers.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                                            {/* Mostrar mensaje si no hay técnicos */}
+                                            {assignableUsers.length > 0 ? (
+                                                assignableUsers.map(u => (
+                                                    <option key={u.id} value={u.id}>{u.full_name || u.username}</option>
+                                                ))
+                                            ) : (
+                                                <option disabled>No hay técnicos disponibles (Verifica usuarios con rol 'assigned')</option>
+                                            )}
                                         </select>
                                     </div>
                                 )}
@@ -628,10 +816,15 @@
         const DashboardScreen = ({ incidents, mode, onBack, onUpdateStatus, onAssign, user, assignableUsers }) => {
             const [selectedTicket, setSelectedTicket] = useState(null);
             if (selectedTicket) return <TicketDetailView ticket={selectedTicket} onBack={()=>setSelectedTicket(null)} onSaveUpdate={onUpdateStatus} onAssign={onAssign} user={user} assignableUsers={assignableUsers} />;
+            
+            // Título según el modo
+            let title = 'Listado General';
+            if (mode === 'status_created') title = 'Mis Reportes Creados';
+            else if (mode === 'status_assigned') title = 'Mis Tareas Asignadas';
 
             return (
                 <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                    <Header title={mode === 'status' ? 'Mis Reportes' : 'Administración'} subtitle="Listado General" onBack={onBack} user={user} />
+                    <Header title={title} subtitle={mode === 'admin_dashboard' ? 'Gestión Global' : 'Consulta'} onBack={onBack} user={user} />
                     <div className="flex-1 p-4 max-w-5xl mx-auto w-full overflow-y-auto pb-20">
                         {incidents.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-64 text-gray-400">
@@ -671,32 +864,79 @@
             const [incidentCatalog, setIncidentCatalog] = useState([]);
             const [assignableUsers, setAssignableUsers] = useState([]);
 
+            // Función centralizada para cargar datos
+            const loadData = async () => {
+                // Solo cargamos catálogos generales una vez si ya están
+                if (catalogs.units.length === 0) {
+                    const cats = await ApiService.fetchCatalogs();
+                    const dynCat = await ApiService.fetchDynamicCatalog(); 
+                    // Carga robusta de usuarios asignables
+                    const aUsers = await ApiService.fetchAssignableUsers();
+                    setCatalogs(cats);
+                    setIncidentCatalog(dynCat);
+                    setAssignableUsers(aUsers);
+                }
+            };
+
+            // Función para cargar incidentes según la vista seleccionada
+            const loadIncidentsForView = async (viewName) => {
+                if (!user) return;
+                
+                let filterMode = 'default';
+                if (viewName === 'status_created') filterMode = 'created_by_me';
+                else if (viewName === 'status_assigned') filterMode = 'assigned_to_me'; // Podríamos implementar esto en PHP si queremos ser estrictos, o dejar que el rol lo maneje por defecto
+                
+                const incs = await ApiService.fetchIncidents(incidentCatalog, user, filterMode);
+                setIncidents(incs);
+            };
+
             useEffect(() => {
                 if (user) {
-                    const loadData = async () => {
-                        const cats = await ApiService.fetchCatalogs();
-                        const dynCat = await ApiService.fetchDynamicCatalog(); 
-                        const incs = await ApiService.fetchIncidents(dynCat, user);
-                        const aUsers = await ApiService.fetchAssignableUsers();
-                        setCatalogs(cats); setIncidentCatalog(dynCat); setIncidents(incs); setAssignableUsers(aUsers);
-                    };
-                    loadData(); setView('menu');
+                    loadData();
+                    setView('menu');
                 }
             }, [user]);
 
-            const handleCreate = async (data) => { await ApiService.createIncident(data); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); setView('menu'); };
-            const handleStatusUpdate = async (id, status, note) => { await ApiService.updateStatus(id, status, note); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); };
-            const handleAssign = async (data) => { await ApiService.assignIncident(data); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); };
+            // Efecto para recargar incidentes cuando cambia la vista
+            useEffect(() => {
+                if (user && (view.startsWith('status') || view === 'admin_dashboard')) {
+                    loadIncidentsForView(view);
+                }
+            }, [view, user]);
+
+            const handleLogout = () => { setUser(null); setView('login'); };
+            
+            const handleCreate = async (data) => { 
+                await ApiService.createIncident(data); 
+                // No recargamos incidentes aquí, se recargarán al cambiar de vista
+                setView('menu'); 
+            };
+            
+            const handleStatusUpdate = async (id, status, note) => { 
+                await ApiService.updateStatus(id, status, note); 
+                loadIncidentsForView(view); // Recargar la vista actual
+            };
+            
+            const handleAssign = async (data) => { 
+                await ApiService.assignIncident(data); 
+                loadIncidentsForView(view); 
+            };
 
             if (!user) return <LoginScreen onLogin={setUser} />;
 
             return (
                 <React.Fragment>
-                    {view === 'menu' && <MainMenu user={user} onNavigate={(t) => t === 'logout' ? setUser(null) : setView(t)} />}
-                    {view === 'create' && <CreateTicket user={user} onCancel={() => setView('menu')} onSubmit={handleCreate} catalogs={catalogs} incidentCatalog={incidentCatalog} />}
-                    {(view === 'status' || view === 'admin_dashboard') && <DashboardScreen mode={view} incidents={incidents} onBack={() => setView(view==='status'?'menu':'admin_menu')} onUpdateStatus={handleStatusUpdate} onAssign={handleAssign} user={user} assignableUsers={assignableUsers} />}
-                    {view === 'admin_menu' && <AdminMenu onNavigate={setView} />}
-                    {view === 'admin_catalog' && (<><Header title="Configuración" subtitle="Catálogos" onBack={() => setView('admin_menu')} user={user} showHome={false} /><CatalogConfig catalog={incidentCatalog} onReload={async ()=>{ const c = await ApiService.fetchDynamicCatalog(); setIncidentCatalog(c); }} /></>)}
+                    {view === 'menu' && <MainMenu user={user} onNavigate={(t) => t === 'logout' ? handleLogout() : setView(t)} />}
+                    
+                    {view === 'create' && <CreateTicket user={user} onCancel={() => setView('menu')} onSubmit={handleCreate} catalogs={catalogs} incidentCatalog={incidentCatalog} onLogout={handleLogout} />}
+                    
+                    {(view === 'status_created' || view === 'status_assigned' || view === 'admin_dashboard') && 
+                        <DashboardScreen mode={view} incidents={incidents} onBack={() => setView(view==='admin_dashboard'?'admin_menu':'menu')} onUpdateStatus={handleStatusUpdate} onAssign={handleAssign} user={user} assignableUsers={assignableUsers} onLogout={handleLogout} />
+                    }
+                    
+                    {view === 'admin_menu' && <AdminMenu onNavigate={setView} user={user} onLogout={handleLogout} />}
+                    {view === 'admin_users' && <UserManagement onBack={() => setView('admin_menu')} user={user} onLogout={handleLogout} />}
+                    {view === 'admin_catalog' && <CatalogConfig catalog={incidentCatalog} onReload={async ()=>{ const c = await ApiService.fetchDynamicCatalog(); setIncidentCatalog(c); }} onBack={() => setView('admin_menu')} user={user} onLogout={handleLogout} />}
                 </React.Fragment>
             );
         };
