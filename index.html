@@ -69,8 +69,7 @@
         ];
 
         const getIconComponent = (iconName) => LucideIcons[iconName] || AlertCircle;
-        // Detección más segura del entorno de preview
-        const isPreview = window.location.hostname.includes('usercontent.goog') || window.location.protocol === 'blob:';
+        const isPreview = window.location.protocol === 'blob:';
 
         // --- SERVICIO API ---
         const ApiService = {
@@ -86,35 +85,19 @@
                     return { success: false, error: 'Error de conexión' }; 
                 }
             },
-            // CORRECCIÓN CRÍTICA EN fetchAssignableUsers
             fetchAssignableUsers: async () => {
-                // Datos de respaldo (Mock Data) para cuando falla la API
-                const mockTechs = [
-                    {id: 3, username: 'tecnico1', full_name: 'Juan Mecánico', role: 'assigned'}, 
-                    {id: 4, username: 'tecnico2', full_name: 'Pedro Llantas', role: 'assigned'}
-                ];
-
-                if(isPreview) return mockTechs;
-
+                if(isPreview) return [{id:3, username:'tecnico1', full_name:'Juan Mecánico'}, {id:4, username:'tecnico2', full_name:'Pedro Llantas'}];
                 try {
-                    // Intentamos obtener usuarios desde manage_user.php (que hace un GET por defecto)
                     const response = await fetch(`${API_URL}/manage_user.php`);
-                    
                     if (!response.ok) throw new Error('Error al conectar con API de usuarios');
-                    
                     const allUsers = await response.json();
-                    
-                    // Verificamos si la respuesta es un array directo o un objeto con data
                     const usersList = Array.isArray(allUsers) ? allUsers : (allUsers.data || []);
-
-                    // Filtramos por rol 'assigned' (Técnicos)
                     const techUsers = usersList.filter(u => u.role === 'assigned');
-                    
-                    console.log("Técnicos encontrados:", techUsers); // Debug en consola
+                    console.log("Técnicos encontrados:", techUsers);
                     return techUsers;
                 } catch(e) { 
-                    console.error("Error fetching assignable users, usando datos de prueba:", e);
-                    return mockTechs; // Devuelve datos de prueba en caso de error
+                    console.error("Error fetching assignable users:", e);
+                    return []; 
                 }
             },
             assignIncident: async (data) => {
@@ -123,11 +106,9 @@
                     return await response.json();
                 } catch(e) { return {success:false}; }
             },
-            // fetchIncidents actualizado para enviar el 'filter_mode'
             fetchIncidents: async (catalog, user, viewMode = 'default') => {
                 if (isPreview) return [];
                 try {
-                    // Determinamos el filtro basado en la vista seleccionada
                     let filterParam = '';
                     if (viewMode === 'status_created') filterParam = '&filter_mode=created_by_me';
                     else if (viewMode === 'status_assigned') filterParam = '&filter_mode=assigned_to_me';
@@ -169,7 +150,7 @@
             },
             createIncident: async (data) => { 
                 try { 
-                    console.log("Enviando reporte a API:", data); // Debug para ver qué enviamos
+                    console.log("Enviando reporte a API:", data);
                     const response = await fetch(`${API_URL}/create_incident.php`, {method:'POST', body:JSON.stringify(data)}); 
                     return await response.json(); 
                 } catch(e){ return {success:false}; } 
@@ -180,7 +161,6 @@
                     return await response.json(); 
                 } catch(e){ return {success:false}; } 
             },
-            // GESTIÓN DE USUARIOS
             fetchUsers: async () => {
                 if (isPreview) return [{id:1, username:'admin', role:'admin', full_name:'Admin'}, {id:2, username:'tec1', role:'assigned', full_name:'Técnico 1'}];
                 try {
@@ -759,7 +739,7 @@
                                         <div className="flex items-center gap-3 mb-2"><span className="bg-[#0b4d9a] text-white px-3 py-1 rounded-lg font-black text-2xl shadow-sm">{ticket.unitNumber}</span> <span className="font-bold text-gray-500 text-lg">{ticket.companyName}</span></div>
                                         <div className="text-gray-400 text-sm font-medium flex items-center gap-2"><Calendar size={14}/> {ticket.created_at?.substring(0,16)}</div>
                                         {/* NUEVO: Mostrar creador del reporte */}
-                                        <div className="text-[#0b4d9a] text-sm font-bold mt-1">Reportado por: {ticket.creator_fullname || ticket.creator_username || 'Desconocido'}</div>
+                                        
                                     </div>
                                     <div className={`px-4 py-2 rounded-xl text-sm font-black uppercase tracking-wide border-2 ${ticket.status==='abierto'?'bg-red-50 text-red-500 border-red-100':'bg-green-50 text-green-600 border-green-100'}`}>{ticket.status}</div>
                                 </div>
@@ -771,7 +751,24 @@
                                     </div>
                                 </div>
                                 {ticket.notes && <div className="text-gray-600 italic bg-yellow-50 p-4 rounded-xl border border-yellow-100">"{ticket.notes}"</div>}
-                                {ticket.assigned_username && <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-[#0b4d9a] rounded-full font-bold text-sm"><UserCheck size={16}/> Asignado a: {ticket.assigned_username}</div>}
+                                
+                                <div className="mt-6 flex flex-wrap gap-3">
+                                    {/* Creado por */}
+                                    <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-[#0b4d9a] rounded-full font-bold text-sm">
+                                        <User size={16}/> Creado por: {ticket.creator_fullname || ticket.creator_username || 'Desconocido'}
+                                    </div>
+                                    
+                                    {/* Asignado a */}
+                                    {ticket.assigned_username ? (
+                                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-700 rounded-full font-bold text-sm">
+                                            <UserCheck size={16}/> Asignado a: {ticket.assigned_username}
+                                        </div>
+                                    ) : (
+                                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-500 rounded-full font-bold text-sm border border-gray-200">
+                                            <UserCheck size={16}/> Sin asignar
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 

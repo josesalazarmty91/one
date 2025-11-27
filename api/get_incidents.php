@@ -8,8 +8,8 @@ $userRole = isset($_GET['role']) ? $_GET['role'] : 'creator';
 $filterMode = isset($_GET['filter_mode']) ? $_GET['filter_mode'] : 'default';
 
 try {
-    // Consulta con JOINs para obtener nombres legibles
-    // COALESCE asegura que si es null, devuelva un valor por defecto
+    // Consulta base con JOINs para obtener nombres legibles
+    // Usamos COALESCE para evitar nulos en nombres de usuario
     $sql = "
         SELECT 
             i.*, 
@@ -35,33 +35,45 @@ try {
 
     $params = [];
 
-    // Lógica de filtrado
+    // --- LÓGICA DE FILTRADO ESTRICTA ---
+
     if ($filterMode === 'created_by_me') {
-        // Caso: "Mis Reportes" (Lo que yo reporté)
+        // MODO: Mis Reportes (Lo que yo creé)
+        // Este filtro aplica para TODOS los roles cuando quieren ver su historial personal
         $sql .= " AND i.created_by = ?";
         $params[] = $userId;
     } 
     elseif ($filterMode === 'assigned_to_me') {
-        // Caso: "Mis Tareas" (Lo que me asignaron)
+        // MODO: Mis Tareas (Lo que me asignaron)
+        // Típicamente para Técnicos, pero un Moderador también podría auto-asignarse
         $sql .= " AND i.assigned_to = ?";
         $params[] = $userId;
     }
     else {
-        // Caso Default por Rol
+        // MODO: Default (Basado en Rol)
+        // Si no se especifica un modo de filtro, aplicamos la lógica de negocio por rol
+        
         if ($userRole === 'admin') {
-            // Admin ve todo, no se agrega filtro extra
-        } elseif ($userRole === 'moderator') {
-            // Moderador ve: Sin asignar O creados por él O asignados a él
-            $sql .= " AND (i.assigned_to IS NULL OR i.created_by = ? OR i.assigned_to = ?)";
+            // Admin ve TODO. No se agregan filtros.
+        } 
+        elseif ($userRole === 'moderator') {
+            // Moderador ve:
+            // 1. Reportes sin asignar (para asignarlos)
+            // 2. Reportes asignados a él mismo
+            // 3. Reportes que él mismo creó
+            // 4. Opcional: Podría ver todo si así se desea, pero esto mantiene su bandeja limpia
+            $sql .= " AND (i.assigned_to IS NULL OR i.assigned_to = ? OR i.created_by = ?)";
             $params[] = $userId;
             $params[] = $userId;
-        } elseif ($userRole === 'assigned') {
-            // Técnico ve: Asignados a él (principalmente)
-            // Nota: Si entra a 'Mis Reportes', usará el modo 'created_by_me' arriba
+        } 
+        elseif ($userRole === 'assigned') {
+            // Técnico (vista por defecto): Ve lo que le asignaron
+            // Si quisiera ver lo que creó, usaría el modo 'created_by_me'
             $sql .= " AND i.assigned_to = ?";
             $params[] = $userId;
-        } else { // creator
-            // Usuario normal solo ve los suyos
+        } 
+        else { 
+            // Creator / Usuario estándar (vista por defecto): Solo ve lo suyo
             $sql .= " AND i.created_by = ?";
             $params[] = $userId;
         }
@@ -74,11 +86,11 @@ try {
     
     $incidents = $stmt->fetchAll();
     
-    // Procesar historial JSON
+    // Procesamiento final de datos para el frontend
     foreach ($incidents as &$ticket) {
         $ticket['history'] = !empty($ticket['history']) ? json_decode($ticket['history']) : [];
         
-        // Asegurar que los campos críticos no sean null para el frontend
+        // Asegurar campos para evitar errores en JS
         if (!$ticket['creator_username']) $ticket['creator_username'] = 'Usuario Eliminado';
     }
     
@@ -86,6 +98,6 @@ try {
 
 } catch(PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode(['error' => 'Error al obtener reportes: ' . $e->getMessage()]);
 }
 ?>
