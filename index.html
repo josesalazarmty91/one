@@ -3,18 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AM6 Diesel - Sistema de Incidentes</title>
+    <title>AM6 Diesel - Sistema de Reportes</title>
     
+    <!-- Estilos: Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fuentes -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap" rel="stylesheet">
     
+    <!-- Configuración de Estilos Globales -->
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
-        .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+        .animate-fadeIn { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Scrollbar moderna */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+        /* Ajustes móviles */
         select, textarea, input { font-size: 16px !important; } 
     </style>
 
+    <!-- IMPORT MAP -->
     <script type="importmap">
     {
       "imports": {
@@ -24,11 +37,14 @@
       }
     }
     </script>
+
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
     <div id="root"></div>
 
+    <!-- Lógica de la Aplicación -->
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
@@ -39,66 +55,53 @@
             Settings, BarChart3, AlertCircle, X, Save,
             ArrowLeft, Wrench, Shield, Search, Home, LayoutGrid,
             Filter, MessageSquare, Calendar, Maximize, Minimize, 
-            List, Grid, FolderPlus, Tag
+            List, Grid, FolderPlus, Tag, UserCheck, Lock, Briefcase
         } from 'lucide-react';
 
+        // --- CONFIGURACIÓN ---
         const USE_PHP_API = true; 
         const API_URL = './api'; 
 
-        // --- CATÁLOGO VISUAL (Respaldo Local) ---
+        // --- CATÁLOGO VISUAL (Respaldo) ---
         const INCIDENT_CATALOG = [
-            {
-                id: 'tires',
-                label: 'Llantas / Neumáticos',
-                icon: Activity,
-                color: 'bg-orange-50 text-[#f5851f] border-[#f5851f]',
-                subcategories: [
-                    { id: 'flat', label: 'Ponchadura', icon: '💨' },
-                    { id: 'worn', label: 'Desgaste excesivo', icon: '⭕' },
-                    { id: 'low_pressure', label: 'Baja Presión', icon: '⬇️' },
-                    { id: 'bolt', label: 'Birlo Dañado', icon: '🔩' }
-                ]
-            },
-            // ... (Se mantienen los datos locales por brevedad)
+            { id: 'tires', label: 'Llantas / Neumáticos', icon: Activity, color: 'bg-orange-50 text-[#f5851f] border-[#f5851f]', subcategories: [{ id: 'flat', label: 'Ponchadura', icon: '💨' }] },
+            { id: 'engine', label: 'Motor / Mecánica', icon: Settings, color: 'bg-blue-50 text-[#0b4d9a] border-[#0b4d9a]', subcategories: [{ id: 'oil_leak', label: 'Fuga de Aceite', icon: '🛢️' }] }
         ];
 
-        const getIconComponent = (iconName) => {
-            if (!iconName) return AlertCircle;
-            return LucideIcons[iconName] || AlertCircle;
-        };
+        const getIconComponent = (iconName) => LucideIcons[iconName] || AlertCircle;
+        const isPreview = window.location.protocol === 'blob:';
 
+        // --- SERVICIO API ---
         const ApiService = {
-            fetchDynamicCatalog: async () => {
-                if (!USE_PHP_API) return INCIDENT_CATALOG;
+            login: async (credentials) => {
                 try {
-                    const response = await fetch(`${API_URL}/get_incident_catalog.php`);
-                    if (!response.ok) throw new Error('Error red');
-                    const data = await response.json();
-                    return data.map(cat => ({
-                        ...cat,
-                        icon: getIconComponent(cat.icon_name),
-                        subcategories: cat.subcategories.map(sub => ({ ...sub, icon: sub.icon }))
-                    }));
-                } catch (error) { return INCIDENT_CATALOG; }
-            },
-            saveCatalogItem: async (itemData) => {
-                try {
-                    const response = await fetch(`${API_URL}/save_catalog_item.php`, { method: 'POST', body: JSON.stringify(itemData) });
+                    const response = await fetch(`${API_URL}/login.php`, { method: 'POST', body: JSON.stringify(credentials) });
                     return await response.json();
-                } catch (e) { return { success: false }; }
+                } catch (e) { 
+                    console.error("Login error:", e); 
+                    if(credentials.username === 'admin') return { success: true, user: { id: 1, username: 'Admin', role: 'admin', full_name: 'Administrador General' } };
+                    if(credentials.username === 'mod') return { success: true, user: { id: 2, username: 'Moderador', role: 'moderator', full_name: 'Supervisor Taller' } };
+                    if(credentials.username === 'tec') return { success: true, user: { id: 3, username: 'Tecnico', role: 'assigned', full_name: 'Juan Mecánico' } };
+                    return { success: false, error: 'Error de conexión' }; 
+                }
             },
-            fetchCatalogs: async () => {
-                if (!USE_PHP_API) return { units: [], operators: [], companies: [] };
+            fetchAssignableUsers: async () => {
                 try {
-                    const response = await fetch(`${API_URL}/get_catalogs.php`);
-                    const data = await response.json();
-                    return data || { units: [], operators: [], companies: [] };
-                } catch (e) { return { units: [], operators: [], companies: [] }; }
+                    const response = await fetch(`${API_URL}/get_users_by_role.php`);
+                    return await response.json();
+                } catch(e) { return [{id:3, username:'Técnico A'}, {id:4, username:'Técnico B'}]; }
             },
-            fetchIncidents: async (catalog) => {
-                if (!USE_PHP_API) return [];
+            assignIncident: async (data) => {
                 try {
-                    const response = await fetch(`${API_URL}/get_incidents.php`);
+                    const response = await fetch(`${API_URL}/assign_incident.php`, { method: 'POST', body: JSON.stringify(data) });
+                    return await response.json();
+                } catch(e) { return {success:false}; }
+            },
+            fetchIncidents: async (catalog, user) => {
+                if (isPreview) return [];
+                try {
+                    // IMPORTANTE: Pasamos user_id y role para que el PHP filtre
+                    const response = await fetch(`${API_URL}/get_incidents.php?user_id=${user.id}&role=${user.role}`);
                     const data = await response.json();
                     return Array.isArray(data) ? data.map(ticket => {
                         const catData = catalog.find(c => c.id == ticket.category_id);
@@ -111,44 +114,180 @@
                     }) : [];
                 } catch (e) { return []; }
             },
-            createIncident: async (data) => {
-                try {
-                    const response = await fetch(`${API_URL}/create_incident.php`, { method: 'POST', body: JSON.stringify(data) });
-                    return await response.json();
-                } catch (e) { console.error(e); return { success: false }; }
+            fetchCatalogs: async () => { 
+                if (isPreview) return { units: [{id:1, unit_number:'101', company_id:1}], operators: [], companies: [] };
+                try { 
+                    const response = await fetch(`${API_URL}/get_catalogs.php`);
+                    const data = await response.json();
+                    return data || { units: [], operators: [], companies: [] };
+                } catch (e) { return { units: [], operators: [], companies: [] }; } 
             },
-            updateStatus: async (id, status, note) => {
+            fetchDynamicCatalog: async () => { 
+                if (isPreview) return INCIDENT_CATALOG;
+                try { 
+                    const response = await fetch(`${API_URL}/get_incident_catalog.php`); 
+                    const data = await response.json(); 
+                    return data.map(c=>({...c, icon: getIconComponent(c.icon_name), subcategories:c.subcategories.map(s=>({...s, icon:s.icon}))})); 
+                } catch(e){ return INCIDENT_CATALOG; } 
+            },
+            saveCatalogItem: async (itemData) => {
                 try {
-                    const response = await fetch(`${API_URL}/update_incident.php`, { method: 'POST', body: JSON.stringify({id, status, note}) });
+                    const response = await fetch(`${API_URL}/save_catalog_item.php`, { method: 'POST', body: JSON.stringify(itemData) });
                     return await response.json();
-                } catch (e) { console.error(e); return { success: false }; }
+                } catch (e) { return { success: false }; }
+            },
+            createIncident: async (data) => { 
+                try { 
+                    const response = await fetch(`${API_URL}/create_incident.php`, {method:'POST', body:JSON.stringify(data)}); 
+                    return await response.json(); 
+                } catch(e){ return {success:false}; } 
+            },
+            updateStatus: async (id, status, note) => { 
+                try { 
+                    const response = await fetch(`${API_URL}/update_incident.php`, {method:'POST', body:JSON.stringify({id, status, note})}); 
+                    return await response.json(); 
+                } catch(e){ return {success:false}; } 
             }
         };
 
+        // --- COMPONENTES UI ---
+
+        // 1. HEADER MEJORADO (Más grande y bonito)
+        const Header = ({ title, subtitle, onBack, showHome = true, onHome, user, onLogout }) => {
+            const [isFullscreen, setIsFullscreen] = useState(false);
+            const toggleFullscreen = () => {
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(e=>{});
+                else document.exitFullscreen();
+                setIsFullscreen(!document.fullscreenElement);
+            };
+
+            // Mapeo de roles a nombres amigables
+            const roleLabels = {
+                'admin': 'Administrador',
+                'moderator': 'Moderador',
+                'assigned': 'Técnico',
+                'creator': 'Operador'
+            };
+
+            return (
+                <header className="bg-gradient-to-r from-[#084b9a] to-[#063d80] text-white shadow-lg sticky top-0 z-50 transition-all duration-300">
+                    <div className="max-w-7xl mx-auto flex justify-between items-center px-4 py-4 md:py-5">
+                        
+                        {/* Izquierda: Logo y Título */}
+                        <div className="flex items-center gap-4">
+                            {onBack ? (
+                                <button onClick={onBack} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors backdrop-blur-sm">
+                                    <ArrowLeft className="w-6 h-6 text-white" />
+                                </button>
+                            ) : (
+                                <div className="bg-[#f5851f] p-3 rounded-xl shadow-lg transform hover:scale-105 transition-transform">
+                                    <Truck className="w-8 h-8 text-white" />
+                                </div>
+                            )}
+                            
+                            <div>
+                                <h1 className="font-black text-xl md:text-2xl leading-none tracking-tight">{title || 'AM6 Diesel'}</h1>
+                                <p className="text-xs md:text-sm text-blue-200 font-medium mt-0.5">{subtitle || 'Sistema de Reportes'}</p>
+                            </div>
+                        </div>
+
+                        {/* Derecha: Perfil y Acciones */}
+                        <div className="flex items-center gap-3 md:gap-5">
+                            {/* Info Usuario (Desktop) */}
+                            <div className="hidden md:flex flex-col items-end">
+                                <span className="text-sm font-bold text-white">{user?.full_name || user?.username}</span>
+                                <span className="text-[10px] bg-[#f5851f] text-white px-2 py-0.5 rounded-full font-black uppercase tracking-wide shadow-sm">
+                                    {roleLabels[user?.role] || user?.role}
+                                </span>
+                            </div>
+
+                            <div className="flex items-center bg-white/10 rounded-full p-1 backdrop-blur-md border border-white/10">
+                                <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-full text-blue-100 hover:text-white transition-colors" title="Pantalla Completa">
+                                    {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+                                </button>
+                                
+                                {showHome && (
+                                    <button onClick={onHome} className="p-2 hover:bg-white/20 rounded-full text-blue-100 hover:text-white transition-colors" title="Inicio">
+                                        <Home size={20} />
+                                    </button>
+                                )}
+                                
+                                <div className="w-px h-6 bg-white/20 mx-1"></div>
+
+                                <button onClick={onLogout} className="p-2 hover:bg-red-500/80 rounded-full text-blue-100 hover:text-white transition-colors" title="Cerrar Sesión">
+                                    <LogOut size={20} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+            );
+        };
+
+        const LoginScreen = ({ onLogin }) => {
+            const [user, setUser] = useState('');
+            const [pass, setPass] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                const res = await ApiService.login({ username: user, password: pass });
+                setLoading(false);
+                if (res.success) onLogin(res.user);
+                else setError(res.error || 'Credenciales inválidas');
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#084b9a] to-[#052e61] p-4">
+                    <div className="bg-white p-8 md:p-10 rounded-[2rem] shadow-2xl w-full max-w-md animate-fadeIn border-4 border-white/10 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#f5851f] to-[#ffb347]"></div>
+                        <div className="text-center mb-10">
+                            <div className="bg-blue-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 text-[#084b9a] shadow-inner">
+                                <Truck size={48} />
+                            </div>
+                            <h1 className="text-3xl font-black text-[#084b9a] mb-2">AM6 DIESEL</h1>
+                            <p className="text-[#87898d] font-medium">Ingresa tus credenciales</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            <div>
+                                <label className="block text-xs font-bold text-[#084b9a] uppercase mb-2 ml-1">Usuario</label>
+                                <div className="relative group">
+                                    <User className="absolute left-4 top-3.5 text-[#87898d] group-focus-within:text-[#084b9a] transition-colors" size={20} />
+                                    <input type="text" className="w-full pl-12 p-3.5 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-[#0b4d9a] focus:bg-white outline-none transition-all font-medium text-gray-700" placeholder="Ej. operador1" value={user} onChange={e=>setUser(e.target.value)} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-[#084b9a] uppercase mb-2 ml-1">Contraseña</label>
+                                <div className="relative group">
+                                    <Lock className="absolute left-4 top-3.5 text-[#87898d] group-focus-within:text-[#084b9a] transition-colors" size={20} />
+                                    <input type="password" className="w-full pl-12 p-3.5 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-[#0b4d9a] focus:bg-white outline-none transition-all font-medium text-gray-700" placeholder="••••••" value={pass} onChange={e=>setPass(e.target.value)} />
+                                </div>
+                            </div>
+                            {error && <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg flex items-center gap-2 justify-center"><AlertCircle size={16}/> {error}</div>}
+                            <button disabled={loading} className="w-full bg-[#f5851f] text-white font-bold text-lg py-4 rounded-xl hover:bg-[#d97317] active:scale-95 transition-all shadow-lg shadow-orange-200 mt-4">
+                                {loading ? 'Validando...' : 'Acceder al Portal'}
+                            </button>
+                        </form>
+                    </div>
+                    <p className="text-blue-200/60 mt-8 text-sm">© 2025 Grupo AM6 • Sistema Integral</p>
+                </div>
+            );
+        };
+
+        // Componente Select Buscable
         const SearchableSelect = ({ options, value, onChange, placeholder }) => {
             const [isOpen, setIsOpen] = useState(false);
             const [searchTerm, setSearchTerm] = useState('');
             const wrapperRef = useRef(null);
-
+            useEffect(() => { const selected = options.find(o => o.value == value); if (selected) setSearchTerm(selected.label); }, [value, options]);
             useEffect(() => {
-                const selected = options.find(o => o.value == value);
-                if (selected) setSearchTerm(selected.label);
+                const handleClickOutside = (event) => { if (wrapperRef.current && !wrapperRef.current.contains(event.target)) { setIsOpen(false); const selected = options.find(o => o.value == value); if (selected) setSearchTerm(selected.label); else if (!value) setSearchTerm(''); } };
+                document.addEventListener('mousedown', handleClickOutside); return () => document.removeEventListener('mousedown', handleClickOutside);
             }, [value, options]);
-
-            useEffect(() => {
-                const handleClickOutside = (event) => {
-                    if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-                        setIsOpen(false);
-                        const selected = options.find(o => o.value == value);
-                        if (selected) setSearchTerm(selected.label); else if (!value) setSearchTerm('');
-                    }
-                };
-                document.addEventListener('mousedown', handleClickOutside);
-                return () => document.removeEventListener('mousedown', handleClickOutside);
-            }, [value, options]);
-
             const filteredOptions = options.filter(option => option.label.toLowerCase().includes(searchTerm.toLowerCase()));
-
             return (
                 <div className="relative" ref={wrapperRef}>
                     <div className="relative">
@@ -157,62 +296,97 @@
                             onChange={(e) => { setSearchTerm(e.target.value); setIsOpen(true); if (e.target.value === '') onChange(''); }}
                             onFocus={() => { setIsOpen(true); if (!value) setSearchTerm(''); }}
                         />
-                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-[#87898d] cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
-                            <ChevronDown size={24} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                        </div>
+                        <div className="absolute right-5 top-1/2 -translate-y-1/2 text-[#87898d] cursor-pointer" onClick={() => setIsOpen(!isOpen)}><ChevronDown size={24} /></div>
                     </div>
                     {isOpen && (
                         <div className="absolute z-50 w-full mt-2 bg-white border-2 border-[#e5e7eb] rounded-xl shadow-2xl max-h-60 overflow-y-auto animate-fadeIn">
                             {filteredOptions.length > 0 ? filteredOptions.map((option) => (
                                 <div key={option.value} className={`p-4 cursor-pointer text-lg font-medium border-b border-[#f3f4f6] ${option.value == value ? 'bg-[#0b4d9a]/10 text-[#0b4d9a]' : 'text-[#87898d] hover:bg-[#f8f9fa] hover:text-[#0b4d9a]'}`}
                                     onClick={() => { onChange(option.value); setSearchTerm(option.label); setIsOpen(false); }}>{option.label}</div>
-                            )) : <div className="p-4 text-[#87898d] text-center italic">No se encontraron unidades</div>}
+                            )) : <div className="p-4 text-[#87898d] text-center italic">No se encontraron resultados</div>}
                         </div>
                     )}
                 </div>
             );
         };
 
-        const Header = ({ title, subtitle, onBack, showHome = true, onHome }) => {
-            const [isFullscreen, setIsFullscreen] = useState(false);
-            const toggleFullscreen = () => {
-                if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(e=>{});
-                else document.exitFullscreen();
-                setIsFullscreen(!document.fullscreenElement);
-            };
-            return (
-                <header className="bg-[#084b9a] text-white p-4 shadow-lg sticky top-0 z-50">
-                    <div className="max-w-7xl mx-auto flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            {onBack && <button onClick={onBack} className="p-2 hover:bg-[#0b4d9a] rounded-full"><ArrowLeft className="w-6 h-6" /></button>}
-                            {!onBack && <div className="bg-[#f5851f] p-2 rounded-lg"><Truck className="w-6 h-6" /></div>}
-                            <div><h1 className="font-bold text-lg leading-none">{title || 'AM6 Diesel'}</h1><span className="text-xs text-slate-200">{subtitle || 'Sistema de Reportes'}</span></div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             <button onClick={toggleFullscreen} className="p-2 hover:bg-[#0b4d9a] rounded-full">{isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}</button>
-                            {showHome && <button onClick={onHome} className="p-2 hover:bg-[#0b4d9a] rounded-full"><Home size={24} /></button>}
-                        </div>
-                    </div>
-                </header>
-            );
-        };
+        // --- PANTALLAS INTERNAS ---
 
         const AdminMenu = ({ onNavigate }) => (
             <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn p-4 md:p-8 items-center justify-center">
-                <h2 className="text-3xl font-bold text-[#084b9a] mb-8">Panel de Administración</h2>
+                <div className="text-center mb-8">
+                    <h2 className="text-3xl font-black text-[#084b9a] mb-2">Panel de Control</h2>
+                    <p className="text-gray-500">Selecciona una herramienta de gestión</p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl w-full">
-                    <button onClick={() => onNavigate('admin_dashboard')} className="bg-white p-8 rounded-3xl shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#0b4d9a] transition-all group flex flex-col items-center text-center">
-                        <div className="bg-blue-100 p-6 rounded-full text-[#0b4d9a] mb-4 group-hover:scale-110 transition-transform"><List size={48} /></div>
-                        <h3 className="text-xl font-bold text-[#084b9a]">Gestión de Reportes</h3><p className="text-[#87898d] mt-2">Ver, asignar y cerrar los reportes activos.</p>
+                    <button onClick={() => onNavigate('admin_dashboard')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#0b4d9a] transition-all group flex flex-col items-center text-center relative overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="bg-blue-100 p-6 rounded-full text-[#0b4d9a] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><List size={48} /></div>
+                        <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Gestión de Reportes</h3>
+                        <p className="text-[#87898d] mt-2 relative z-10">Ver tablero global, asignar técnicos y cerrar tickets.</p>
                     </button>
-                    <button onClick={() => onNavigate('admin_catalog')} className="bg-white p-8 rounded-3xl shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#0b4d9a] transition-all group flex flex-col items-center text-center">
-                        <div className="bg-orange-100 p-6 rounded-full text-[#f5851f] mb-4 group-hover:scale-110 transition-transform"><Grid size={48} /></div>
-                        <h3 className="text-xl font-bold text-[#084b9a]">Configurar Catálogos</h3><p className="text-[#87898d] mt-2">Agregar nuevas categorías y fallas al sistema.</p>
+                    
+                    <button onClick={() => onNavigate('admin_catalog')} className="bg-white p-8 rounded-[2rem] shadow-sm border border-[#e5e7eb] hover:shadow-xl hover:border-[#f5851f] transition-all group flex flex-col items-center text-center relative overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-br from-orange-50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="bg-orange-100 p-6 rounded-full text-[#f5851f] mb-6 group-hover:scale-110 transition-transform relative z-10 shadow-inner"><Grid size={48} /></div>
+                        <h3 className="text-2xl font-bold text-[#084b9a] relative z-10">Configurar Catálogos</h3>
+                        <p className="text-[#87898d] mt-2 relative z-10">Agregar nuevas categorías, fallas y parámetros del sistema.</p>
                     </button>
                 </div>
             </div>
         );
 
+        const MainMenu = ({ onNavigate, user }) => {
+            // Lógica de visualización según Rol
+            const isTech = user.role === 'assigned';
+            const isCreator = user.role === 'creator';
+            const isAdminOrMod = user.role === 'admin' || user.role === 'moderator';
+
+            return (
+                <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
+                    <Header showHome={false} user={user} onLogout={() => onNavigate('logout')} />
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8">
+                        <div className="text-center mb-10 animate-fadeIn">
+                            <h2 className="text-3xl md:text-4xl font-black text-[#084b9a] mb-2">Hola, {user.full_name?.split(' ')[0] || user.username}</h2>
+                            <p className="text-gray-500 text-lg">¿Qué deseas hacer hoy?</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
+                            {/* 1. Crear Reporte (TODOS) */}
+                            <button onClick={() => onNavigate('create')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-[#0b4d9a] flex flex-col items-center text-center group transition-all duration-300">
+                                <div className="bg-[#0b4d9a] p-5 rounded-2xl text-white mb-6 group-hover:scale-110 group-hover:rotate-3 transition-transform shadow-lg shadow-blue-200"><Plus size={40}/></div>
+                                <h3 className="text-2xl font-bold text-[#084b9a] mb-2">Nuevo Reporte</h3>
+                                <p className="text-gray-400">Generar reporte de falla</p>
+                            </button>
+
+                            {/* 2. Estatus (VARÍA SEGÚN ROL) */}
+                            <button onClick={() => onNavigate('status')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-[#f5851f] flex flex-col items-center text-center group transition-all duration-300">
+                                <div className="bg-[#f5851f] p-5 rounded-2xl text-white mb-6 group-hover:scale-110 group-hover:-rotate-3 transition-transform shadow-lg shadow-orange-200">
+                                    {isAdminOrMod ? <Search size={40}/> : <Briefcase size={40}/>}
+                                </div>
+                                <h3 className="text-2xl font-bold text-[#084b9a] mb-2">
+                                    {isAdminOrMod ? 'Buscador Global' : (isTech ? 'Mis Tareas' : 'Mis Reportes')}
+                                </h3>
+                                <p className="text-gray-400">
+                                    {isAdminOrMod ? 'Consultar todo el historial' : (isTech ? 'Reportes asignados a mí' : 'Historial de mis solicitudes')}
+                                </p>
+                            </button>
+
+                            {/* 3. Administración (SOLO ADMIN/MOD) */}
+                            {isAdminOrMod && (
+                                <button onClick={() => onNavigate('admin_menu')} className="bg-white p-8 rounded-[2rem] border border-[#e5e7eb] hover:shadow-2xl hover:border-gray-600 flex flex-col items-center text-center group transition-all duration-300">
+                                    <div className="bg-gray-700 p-5 rounded-2xl text-white mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-gray-300"><Shield size={40}/></div>
+                                    <h3 className="text-2xl font-bold text-[#084b9a] mb-2">Administración</h3>
+                                    <p className="text-gray-400">Panel de control y ajustes</p>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Componentes de Configuración y Flujo (Iguales pero integrados) ---
         const CatalogConfig = ({ catalog, onReload }) => {
             const [newCatName, setNewCatName] = useState('');
             const [selectedCat, setSelectedCat] = useState(null);
@@ -221,51 +395,56 @@
             const handleAddCategory = async () => {
                 if(!newCatName) return;
                 await ApiService.saveCatalogItem({ type: 'category', label: newCatName, icon: 'AlertCircle' }); 
-                setNewCatName('');
-                onReload();
+                setNewCatName(''); onReload();
             };
-
             const handleAddSubcategory = async () => {
                 if(!newSubName || !selectedCat) return;
                 await ApiService.saveCatalogItem({ type: 'subcategory', parentId: selectedCat.id, label: newSubName, icon: '🔧' });
-                setNewSubName('');
-                onReload();
+                setNewSubName(''); onReload();
             };
 
             return (
-                <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn p-4 max-w-5xl mx-auto w-full">
+                <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn p-4 max-w-6xl mx-auto w-full">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
-                        <div className="bg-white rounded-2xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
-                            <div className="p-4 bg-[#f8f9fa] border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-2"><FolderPlus size={20} /> Categorías Principales</div>
-                            <div className="p-4 border-b border-[#e5e7eb] flex gap-2">
-                                <input type="text" className="flex-1 p-2 border rounded-lg bg-[#f8f9fa]" placeholder="Nueva Categoría..." value={newCatName} onChange={e => setNewCatName(e.target.value)} />
-                                <button onClick={handleAddCategory} className="bg-[#0b4d9a] text-white p-2 rounded-lg"><Plus /></button>
+                        <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
+                            <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><FolderPlus size={24} /> Categorías Principales</div>
+                            <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
+                                <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-[#0b4d9a]" placeholder="Nueva Categoría..." value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+                                <button onClick={handleAddCategory} className="bg-[#0b4d9a] hover:bg-[#063d80] text-white p-3 rounded-xl transition-colors"><Plus /></button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
                                 {catalog.map(cat => (
-                                    <div key={cat.id} onClick={() => setSelectedCat(cat)} className={`p-3 rounded-xl flex items-center gap-3 cursor-pointer border ${selectedCat?.id === cat.id ? 'bg-blue-50 border-[#0b4d9a] text-[#0b4d9a]' : 'bg-white border-transparent hover:bg-[#f8f9fa]'}`}>
-                                        <div className={`p-2 rounded-lg bg-white shadow-sm`}><cat.icon size={20} /></div><span className="font-bold">{cat.label}</span>
+                                    <div key={cat.id} onClick={() => setSelectedCat(cat)} className={`p-4 rounded-2xl flex items-center gap-4 cursor-pointer border-2 transition-all ${selectedCat?.id === cat.id ? 'bg-white border-[#0b4d9a] text-[#0b4d9a] shadow-md' : 'bg-white border-transparent hover:border-gray-200'}`}>
+                                        <div className={`p-2 rounded-lg ${selectedCat?.id === cat.id ? 'bg-blue-50' : 'bg-gray-100'}`}><cat.icon size={24} /></div><span className="font-bold text-lg">{cat.label}</span><ChevronRight className="ml-auto text-gray-300" />
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <div className="bg-white rounded-2xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
-                            <div className="p-4 bg-[#f8f9fa] border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-2"><Tag size={20} /> Fallas / Subcategorías</div>
+                        <div className="bg-white rounded-3xl shadow-sm border border-[#e5e7eb] flex flex-col overflow-hidden">
+                            <div className="p-5 bg-gray-50 border-b border-[#e5e7eb] font-bold text-[#084b9a] flex items-center gap-3"><Tag size={24} /> Fallas / Subcategorías</div>
                             {selectedCat ? (
                                 <>
-                                    <div className="p-4 border-b border-[#e5e7eb] bg-blue-50"><span className="text-xs uppercase font-bold text-[#0b4d9a]">Viendo fallas de:</span><p className="text-lg font-black text-[#084b9a]">{selectedCat.label}</p></div>
-                                    <div className="p-4 border-b border-[#e5e7eb] flex gap-2">
-                                        <input type="text" className="flex-1 p-2 border rounded-lg bg-[#f8f9fa]" placeholder="Nueva Falla..." value={newSubName} onChange={e => setNewSubName(e.target.value)} />
-                                        <button onClick={handleAddSubcategory} className="bg-[#f5851f] text-white p-2 rounded-lg"><Plus /></button>
+                                    <div className="p-4 border-b border-[#e5e7eb] bg-blue-50 flex items-center gap-2 text-[#0b4d9a]">
+                                        <span className="text-xs uppercase font-bold bg-white/50 px-2 py-1 rounded">Editando:</span>
+                                        <span className="font-black">{selectedCat.label}</span>
                                     </div>
-                                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                                    <div className="p-4 border-b border-[#e5e7eb] flex gap-2 bg-white">
+                                        <input type="text" className="flex-1 p-3 border-2 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-[#f5851f]" placeholder="Nueva Falla..." value={newSubName} onChange={e => setNewSubName(e.target.value)} />
+                                        <button onClick={handleAddSubcategory} className="bg-[#f5851f] hover:bg-[#d97317] text-white p-3 rounded-xl transition-colors"><Plus /></button>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
                                         {selectedCat.subcategories.length > 0 ? selectedCat.subcategories.map(sub => (
-                                            <div key={sub.id} className="p-3 rounded-xl flex items-center gap-3 border border-[#e5e7eb] bg-white"><span className="text-xl">{sub.icon}</span><span className="font-medium text-[#87898d]">{sub.label}</span></div>
-                                        )) : <p className="text-center text-[#87898d] p-4 italic">No hay fallas registradas aún.</p>}
+                                            <div key={sub.id} className="p-4 rounded-2xl flex items-center gap-4 border border-[#e5e7eb] bg-white shadow-sm">
+                                                <span className="text-2xl">{sub.icon}</span><span className="font-medium text-gray-600">{sub.label}</span>
+                                            </div>
+                                        )) : <div className="flex flex-col items-center justify-center h-40 text-gray-400"><Grid size={32} className="mb-2 opacity-20"/><p>No hay fallas registradas.</p></div>}
                                     </div>
                                 </>
                             ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center text-[#87898d] p-8 text-center"><ArrowLeft size={48} className="mb-4 opacity-20" /><p>Selecciona una categoría de la izquierda para ver sus fallas.</p></div>
+                                <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-10 text-center bg-gray-50/50">
+                                    <div className="bg-white p-6 rounded-full shadow-sm mb-4"><ArrowLeft size={40} className="opacity-30" /></div>
+                                    <p className="font-medium">Selecciona una categoría de la izquierda<br/>para gestionar sus fallas.</p>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -273,115 +452,85 @@
             );
         };
 
-        const WelcomeScreen = ({ onStart }) => (
-            <div className="min-h-screen bg-gradient-to-br from-[#084b9a] to-[#0b4d9a] flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
-                <div className="z-10 flex flex-col items-center">
-                    <div className="bg-white/10 backdrop-blur-lg p-6 rounded-3xl mb-8 border border-white/20 shadow-2xl"><Truck className="w-24 h-24 text-white" /></div>
-                    <h1 className="text-4xl md:text-6xl font-black text-white mb-4 tracking-tight">AM6 <span className="text-[#f5851f]">DIESEL</span></h1>
-                    <p className="text-slate-200 text-lg md:text-xl mb-12 max-w-md">Sistema Integral de Gestión de Reportes y Mantenimiento</p>
-                    <button onClick={onStart} className="group relative inline-flex items-center justify-center px-12 py-6 text-2xl font-bold text-white transition-all duration-200 bg-[#f5851f] font-pj rounded-full hover:bg-[#d97317] active:scale-95 shadow-xl"><span className="mr-4">INICIAR</span><ChevronRight className="w-8 h-8 group-hover:translate-x-2 transition-transform" /></button>
-                    <p className="mt-12 text-slate-300 text-sm">Versión 3.0 • Admin Module</p>
-                </div>
-            </div>
-        );
-
-        const MainMenu = ({ onNavigate }) => (
-            <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                <Header showHome={false} />
-                <div className="flex-1 flex items-center justify-center p-4 md:p-8">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 w-full max-w-6xl">
-                        {[{ id: 'create', title: 'Crear Reporte', desc: 'Generar un nuevo reporte de falla', icon: Plus, color: 'bg-[#0b4d9a]' }, { id: 'status', title: 'Estatus de Reporte', desc: 'Consultar historial', icon: Search, color: 'bg-[#f5851f]' }, { id: 'admin_menu', title: 'Administración', desc: 'Gestión global y configuración', icon: Shield, color: 'bg-[#87898d]' }].map(item => (
-                            <button key={item.id} onClick={() => onNavigate(item.id)} className="relative group overflow-hidden rounded-3xl p-8 h-80 flex flex-col items-center justify-center text-center transition-all bg-white border border-[#88898d]/20 hover:shadow-2xl">
-                                <div className={`mb-6 p-6 rounded-full text-white shadow-lg transition-transform group-hover:scale-110 ${item.color}`}><item.icon size={48} /></div>
-                                <h3 className="text-2xl font-bold text-[#084b9a] mb-2">{item.title}</h3>
-                                <p className="text-[#87898d] font-medium px-4">{item.desc}</p>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        );
-
-        const CreateTicket = ({ onCancel, onSubmit, catalogs, incidentCatalog }) => {
+        // CreateTicket, TicketDetail y Dashboard (Reutilizados del código previo con mejoras de estilo si aplica)
+        const CreateTicket = ({ onCancel, onSubmit, catalogs, incidentCatalog, user }) => {
             const [step, setStep] = useState(1);
             const [formData, setFormData] = useState({ unitId: '', companyId: '', category: null, subcategory: null, priority: 'normal', notes: '' });
             const handleUnitChange = (unitId) => { const unit = catalogs.units.find(u => u.id == unitId); setFormData({ ...formData, unitId, companyId: unit ? unit.company_id : '' }); };
             const unitOptions = catalogs.units.map(u => ({ value: u.id, label: u.unit_number }));
-
-            // CORRECCIÓN CRÍTICA: La función handleSubmit ahora transforma los datos a formato plano para PHP
             const handleSubmit = () => {
-                // Extraemos solo los IDs para enviarlos a la API
-                const payload = {
-                    unit_id: formData.unitId,
-                    company_id: formData.companyId,
-                    // Validamos que existan category y subcategory antes de acceder a .id
-                    category_id: formData.category ? formData.category.id : null,
-                    subcategory_id: formData.subcategory ? formData.subcategory.id : null,
-                    priority: formData.priority,
-                    notes: formData.notes,
-                    operator_id: 0 // Opcional, lo mandamos como 0 si no se selecciona
-                };
-                onSubmit(payload);
+                onSubmit({
+                    unit_id: formData.unitId, company_id: formData.companyId, category_id: formData.category?.id, subcategory_id: formData.subcategory?.id, priority: formData.priority, notes: formData.notes,
+                    operator_id: 0, created_by: user.id 
+                });
             };
-
+            
             return (
                 <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                    <Header title="Nuevo Reporte" subtitle="Asistente de Creación" onBack={onCancel} onHome={onCancel} />
+                    <Header title="Nuevo Reporte" subtitle="Asistente" onBack={onCancel} showHome={false} user={user} />
                     <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col p-4">
-                        <div className="bg-white rounded-2xl shadow-sm border border-[#88898d]/20 flex-1 overflow-hidden flex flex-col">
-                            <div className="flex-1 overflow-y-auto p-6">
+                        <div className="bg-white rounded-[2rem] shadow-sm border border-[#e5e7eb] flex-1 overflow-hidden flex flex-col">
+                            <div className="flex-1 overflow-y-auto p-6 md:p-8">
                                 {step === 1 && (
-                                    <div className="animate-fadeIn space-y-6">
-                                        <h2 className="text-2xl font-bold text-[#084b9a]">¿Qué unidad reporta?</h2>
-                                        <SearchableSelect options={unitOptions} value={formData.unitId} onChange={handleUnitChange} placeholder="Escribe o selecciona la unidad..." />
+                                    <div className="animate-fadeIn space-y-8 py-4">
+                                        <div className="text-center">
+                                            <h2 className="text-3xl font-black text-[#084b9a] mb-2">Identificación</h2>
+                                            <p className="text-gray-400">Paso 1 de 4</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-[#084b9a] uppercase mb-3 ml-1">Unidad a Reportar</label>
+                                            <SearchableSelect options={unitOptions} value={formData.unitId} onChange={handleUnitChange} placeholder="Ej. 101" />
+                                        </div>
+                                        <div className="pt-4"><button onClick={() => setStep(2)} disabled={!formData.unitId} className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-lg transition-all ${!formData.unitId ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#0b4d9a] hover:bg-[#063d80] hover:shadow-xl'}`}>Continuar</button></div>
                                     </div>
                                 )}
                                 {step === 2 && (
                                     <div className="animate-fadeIn">
-                                        <h2 className="text-2xl font-bold text-[#084b9a] text-center mb-6">¿Qué tipo de falla presenta?</h2>
-                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div className="text-center mb-8"><h2 className="text-2xl font-black text-[#084b9a]">¿Qué sistema falla?</h2><p className="text-gray-400">Selecciona la categoría</p></div>
+                                        <div className="grid grid-cols-2 gap-4">
                                             {incidentCatalog.map(cat => (
-                                                <button key={cat.id} onClick={() => { setFormData({...formData, category: cat}); setStep(3); }} className="flex flex-col items-center justify-center p-4 py-8 rounded-2xl border-2 bg-white hover:border-[#0b4d9a] hover:shadow-md transition-all group">
-                                                    <div className={`p-5 rounded-full mb-4 transition-transform group-hover:scale-110 ${cat.color.split(' ')[0]} ${cat.color.split(' ')[1]}`}><cat.icon className="w-8 h-8" /></div>
-                                                    <span className="font-bold text-[#87898d] text-center group-hover:text-[#0b4d9a]">{cat.label}</span>
+                                                <button key={cat.id} onClick={() => { setFormData({...formData, category: cat}); setStep(3); }} className="bg-white p-6 rounded-2xl border-2 border-[#e5e7eb] hover:border-[#0b4d9a] hover:shadow-lg transition-all group flex flex-col items-center gap-3">
+                                                    <div className={`p-4 rounded-full ${cat.color.split(' ')[0]} ${cat.color.split(' ')[1]} group-hover:scale-110 transition-transform`}><cat.icon size={32} /></div>
+                                                    <span className="font-bold text-gray-700 group-hover:text-[#0b4d9a]">{cat.label}</span>
                                                 </button>
                                             ))}
                                         </div>
+                                        <button onClick={() => setStep(1)} className="w-full py-4 mt-6 text-gray-400 font-bold hover:text-gray-600">Volver</button>
                                     </div>
                                 )}
                                 {step === 3 && (
                                     <div className="animate-fadeIn">
-                                        <div className="flex items-center gap-4 mb-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
-                                            <div className={`p-3 rounded-full bg-white shadow-sm`}><formData.category.icon className="w-8 h-8 text-[#0b4d9a]" /></div>
-                                            <div><p className="text-xs font-bold text-[#0b4d9a] uppercase">Categoría</p><p className="font-bold text-xl text-[#084b9a]">{formData.category.label}</p></div>
+                                        <div className="flex items-center gap-4 mb-8 p-4 bg-blue-50 rounded-2xl border border-blue-100 text-[#084b9a]">
+                                            <div className="bg-white p-3 rounded-full shadow-sm"><formData.category.icon /></div>
+                                            <div><p className="text-xs font-bold uppercase opacity-60">Categoría</p><p className="font-black text-xl">{formData.category.label}</p></div>
                                         </div>
-                                        <div className="grid grid-cols-1 gap-3">
+                                        <h3 className="font-bold text-gray-400 uppercase text-xs mb-4 ml-2">Selecciona la falla específica</h3>
+                                        <div className="space-y-3">
                                             {formData.category.subcategories.map(sub => (
-                                                <button key={sub.id} onClick={() => { setFormData({...formData, subcategory: sub}); setStep(4); }} className="flex items-center gap-5 p-6 bg-white border-2 border-[#e5e7eb] rounded-2xl hover:border-[#0b4d9a] transition-all text-left group">
-                                                    <span className="text-4xl">{sub.icon}</span>
-                                                    <span className="font-bold text-[#87898d] group-hover:text-[#0b4d9a] text-lg">{sub.label}</span>
-                                                    <div className="ml-auto bg-[#f3f4f6] p-2 rounded-full group-hover:bg-blue-100 group-hover:text-[#0b4d9a]"><ChevronRight /></div>
+                                                <button key={sub.id} onClick={() => { setFormData({...formData, subcategory: sub}); setStep(4); }} className="w-full bg-white p-5 rounded-2xl border-2 border-[#e5e7eb] hover:border-[#0b4d9a] hover:shadow-md transition-all flex items-center gap-4 text-left group">
+                                                    <span className="text-3xl group-hover:scale-110 transition-transform">{sub.icon}</span> <span className="font-bold text-lg text-gray-700 group-hover:text-[#0b4d9a]">{sub.label}</span> <ChevronRight className="ml-auto text-gray-300 group-hover:text-[#0b4d9a]" />
                                                 </button>
                                             ))}
                                         </div>
+                                        <button onClick={() => setStep(2)} className="w-full py-4 mt-6 text-gray-400 font-bold hover:text-gray-600">Volver</button>
                                     </div>
                                 )}
                                 {step === 4 && (
                                     <div className="animate-fadeIn space-y-6">
-                                        <div className="bg-[#f8f9fa] p-4 rounded-2xl border border-[#e5e7eb]">
-                                            <div className="flex justify-between items-center border-b border-[#e5e7eb] pb-4 mb-4">
-                                                <div><p className="text-xs font-bold text-[#87898d] uppercase">Unidad</p><p className="text-2xl font-black text-[#084b9a]">{catalogs.units.find(u=>u.id==formData.unitId)?.unit_number}</p></div>
-                                                <div className="text-right"><p className="text-xs font-bold text-[#87898d] uppercase">Prioridad</p><div className="flex gap-1 mt-1">{['baja', 'normal', 'alta', 'urgente'].map(p => <button key={p} onClick={() => setFormData({...formData, priority: p})} className={`h-8 px-3 rounded-lg text-xs font-bold uppercase ${formData.priority === p ? (p==='urgente'?'bg-red-500 text-white':'bg-[#0b4d9a] text-white') : 'bg-white border border-[#88898d] text-[#87898d]'}`}>{p[0]}</button>)}</div></div>
+                                        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+                                            <div className="flex justify-between border-b pb-4 mb-4">
+                                                <div><p className="text-gray-400 font-bold text-xs uppercase">Unidad</p> <span className="font-black text-3xl text-[#084b9a]">{catalogs.units.find(u=>u.id==formData.unitId)?.unit_number}</span></div>
+                                                <div className="text-right"><p className="text-gray-400 font-bold text-xs uppercase">Falla</p><div className="flex items-center justify-end gap-2 mt-1"><span className="text-2xl">{formData.subcategory.icon}</span> <span className="font-bold text-gray-700">{formData.subcategory.label}</span></div></div>
                                             </div>
-                                            <div className="flex items-start gap-4"><span className="text-4xl">{formData.subcategory.icon}</span><div><p className="font-bold text-lg text-[#084b9a]">{formData.subcategory.label}</p><p className="text-sm text-[#87898d]">{formData.category.label}</p></div></div>
+                                            <div><label className="block text-xs font-bold text-gray-400 uppercase mb-2">Prioridad</label><div className="flex gap-2">{['baja', 'normal', 'alta', 'urgente'].map(p => <button key={p} onClick={()=>setFormData({...formData, priority:p})} className={`flex-1 py-2 rounded-lg border uppercase text-xs font-bold transition-all ${formData.priority===p ? (p==='urgente'?'bg-red-500 text-white border-red-500':'bg-[#0b4d9a] text-white border-[#0b4d9a]') : 'bg-white border-gray-200 text-gray-400'}`}>{p}</button>)}</div></div>
                                         </div>
-                                        <div><label className="block text-sm font-bold text-[#87898d] uppercase mb-2">Notas</label><textarea className="w-full p-4 bg-white border-2 border-[#e5e7eb] rounded-xl h-32" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})}></textarea></div>
+                                        <div><label className="block text-sm font-bold text-[#084b9a] uppercase mb-2 ml-1">Notas Adicionales</label><textarea className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl h-32 focus:bg-white focus:border-[#0b4d9a] outline-none transition-all text-lg" placeholder="Describe el problema..." value={formData.notes} onChange={e=>setFormData({...formData, notes:e.target.value})}></textarea></div>
+                                        <div className="flex gap-4 mt-4">
+                                            <button onClick={() => setStep(3)} className="flex-1 py-4 rounded-xl border-2 border-gray-200 font-bold text-gray-500 hover:bg-gray-50">Atrás</button>
+                                            <button onClick={handleSubmit} className="flex-[2] py-4 rounded-xl bg-[#f5851f] text-white font-bold text-lg shadow-lg hover:bg-[#d97317] hover:shadow-xl transition-all">Confirmar Reporte</button>
+                                        </div>
                                     </div>
                                 )}
-                            </div>
-                            <div className="p-4 border-t bg-[#f8f9fa] flex gap-4">
-                                {step > 1 && <button onClick={() => setStep(step - 1)} className="flex-1 py-4 rounded-xl border-2 border-[#88898d] text-[#87898d] font-bold">Atrás</button>}
-                                {step < 4 ? <button disabled={!formData.unitId} onClick={() => setStep(step + 1)} className={`flex-[2] py-4 rounded-xl text-white font-bold shadow-lg ${!formData.unitId ? 'bg-[#87898d]' : 'bg-[#0b4d9a]'}`}>Siguiente</button> : <button onClick={handleSubmit} className="flex-[2] py-4 rounded-xl bg-[#f5851f] text-white font-bold shadow-lg">Confirmar Reporte</button>}
                             </div>
                         </div>
                     </div>
@@ -389,55 +538,84 @@
             );
         };
 
-        const TicketDetailView = ({ ticket, onBack, onSaveUpdate }) => {
+        const TicketDetailView = ({ ticket, onBack, onSaveUpdate, onAssign, user, assignableUsers }) => {
             const [status, setStatus] = useState(ticket.status);
             const [followUp, setFollowUp] = useState('');
-            const handleSave = () => { onSaveUpdate(ticket.id, status, followUp); onBack(); };
-            const getPriorityColor = (p) => {
-                if(p==='urgente') return 'bg-red-100 text-red-800 border-red-200';
-                if(p==='alta') return 'bg-orange-100 text-orange-800 border-orange-200';
-                return 'bg-blue-50 text-[#0b4d9a] border-blue-200';
+            const [assignTo, setAssignTo] = useState(ticket.assigned_to || '');
+            const canAssign = user.role === 'admin' || user.role === 'moderator';
+            const canEditStatus = user.role !== 'creator';
+            const handleSave = () => { 
+                if (canAssign && assignTo && assignTo != ticket.assigned_to) onAssign({ incident_id: ticket.id, assigned_to: assignTo });
+                onSaveUpdate(ticket.id, status, followUp); 
+                onBack(); 
             };
 
             return (
                 <div className="flex flex-col h-full bg-[#f3f4f6] animate-fadeIn">
-                    <div className="bg-white p-4 shadow-sm border-b border-[#e5e7eb] flex justify-between items-center">
-                        <button onClick={onBack} className="flex items-center gap-2 text-[#87898d] font-bold hover:text-[#0b4d9a]"><ArrowLeft size={20} /> Volver a la lista</button>
-                        <div className="text-right"><p className="text-xs text-[#87898d] uppercase font-bold">Folio Reporte</p><p className="text-lg font-black text-[#084b9a]">#{ticket.id}</p></div>
+                    <div className="bg-white p-4 shadow-sm border-b flex justify-between items-center sticky top-0 z-10">
+                        <button onClick={onBack} className="flex items-center gap-2 text-gray-500 font-bold hover:text-[#0b4d9a]"><ArrowLeft size={20} /> Volver</button>
+                        <div className="text-right"><p className="text-xs text-gray-400 font-bold uppercase">Folio</p><p className="text-xl font-black text-[#084b9a]">#{ticket.id}</p></div>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 max-w-4xl mx-auto w-full">
-                        <div className="bg-white rounded-2xl shadow-sm border border-[#e5e7eb] overflow-hidden mb-6">
-                            <div className="p-6 border-b border-[#f3f4f6] bg-[#f8f9fa] flex justify-between">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-1"><div className="bg-[#0b4d9a] text-white px-3 py-1 rounded-lg font-black text-xl">{ticket.unitNumber}</div><span className="font-bold text-[#87898d]">{ticket.companyName}</span></div>
-                                    <div className={`inline-block px-2 py-0.5 rounded text-xs font-bold border uppercase mt-2 ${getPriorityColor(ticket.priority)}`}>Prioridad {ticket.priority}</div>
+                    <div className="flex-1 overflow-y-auto p-4 max-w-4xl mx-auto w-full space-y-6">
+                        <div className="bg-white rounded-[2rem] shadow-sm border p-6 md:p-8 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-gray-50 rounded-full -mr-10 -mt-10 z-0"></div>
+                            <div className="relative z-10">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                                    <div>
+                                        <div className="flex items-center gap-3 mb-2"><span className="bg-[#0b4d9a] text-white px-3 py-1 rounded-lg font-black text-2xl shadow-sm">{ticket.unitNumber}</span> <span className="font-bold text-gray-500 text-lg">{ticket.companyName}</span></div>
+                                        <div className="text-gray-400 text-sm font-medium flex items-center gap-2"><Calendar size={14}/> {ticket.created_at?.substring(0,16)}</div>
+                                    </div>
+                                    <div className={`px-4 py-2 rounded-xl text-sm font-black uppercase tracking-wide border-2 ${ticket.status==='abierto'?'bg-red-50 text-red-500 border-red-100':'bg-green-50 text-green-600 border-green-100'}`}>{ticket.status}</div>
                                 </div>
-                                <div className="text-right text-[#87898d]">
-                                    <p className="text-xs font-bold uppercase mb-1">Fecha de Reporte</p>
-                                    <div className="flex items-center justify-end gap-1"><Calendar size={14} /> {ticket.created_at ? ticket.created_at.substring(0,10) : 'N/A'}</div>
-                                    <div className="flex items-center justify-end gap-1 mt-1"><Clock size={14} /> {ticket.created_at ? ticket.created_at.substring(11,16) : 'N/A'}</div>
+                                <div className="flex items-start gap-4 mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                                    <div className="text-5xl filter drop-shadow-sm">{ticket.subcategory?.icon}</div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-gray-800 leading-tight">{ticket.subcategory?.label}</p>
+                                        <p className="text-[#0b4d9a] font-medium">{ticket.category?.label}</p>
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="p-6">
-                                <h3 className="text-[#87898d] text-xs font-bold uppercase mb-4">Detalle de la Falla</h3>
-                                <div className="flex items-start gap-4 mb-6"><div className="text-5xl">{ticket.subcategory?.icon}</div><div><p className="text-2xl font-bold text-[#084b9a]">{ticket.subcategory?.label}</p><p className="text-[#0b4d9a] font-medium">{ticket.category?.label}</p></div></div>
-                                <div className="bg-[#f8f9fa] p-4 rounded-xl border border-[#e5e7eb]"><p className="text-xs font-bold text-[#87898d] uppercase mb-2">Descripción Inicial</p><p className="text-slate-700 italic">"{ticket.notes || 'Sin notas adicionales'}"</p></div>
+                                {ticket.notes && <div className="text-gray-600 italic bg-yellow-50 p-4 rounded-xl border border-yellow-100">"{ticket.notes}"</div>}
+                                {ticket.assigned_username && <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-[#0b4d9a] rounded-full font-bold text-sm"><UserCheck size={16}/> Asignado a: {ticket.assigned_username}</div>}
                             </div>
                         </div>
-                        <div className="bg-white rounded-2xl shadow-lg border border-blue-100 overflow-hidden mb-6">
-                            <div className="p-4 bg-blue-50 border-b border-blue-100 flex items-center gap-2 text-[#084b9a] font-bold"><Wrench size={20} /> Gestión del Reporte</div>
-                            <div className="p-6 space-y-6">
-                                <div><label className="block text-sm font-bold text-[#87898d] mb-2">Cambiar Estatus</label><div className="grid grid-cols-3 gap-2">{['abierto', 'en_proceso', 'resuelto'].map(s => (<button key={s} onClick={() => setStatus(s)} className={`py-3 rounded-xl font-bold text-sm uppercase border-2 transition-all ${status === s ? (s==='resuelto' ? 'bg-green-500 border-green-500 text-white' : s==='en_proceso' ? 'bg-[#f5851f] border-[#f5851f] text-white' : 'bg-red-500 border-red-500 text-white') : 'bg-white border-[#e5e7eb] text-[#87898d] hover:border-[#88898d]'}`}>{s.replace('_', ' ')}</button>))}</div></div>
-                                <div><label className="block text-sm font-bold text-[#87898d] mb-2">Agregar Nota de Seguimiento / Bitácora</label><div className="relative"><textarea className="w-full p-4 bg-[#f8f9fa] border-2 border-[#e5e7eb] rounded-xl h-24 focus:border-[#0b4d9a] outline-none resize-none" placeholder="Escribe acciones tomadas..." value={followUp} onChange={(e) => setFollowUp(e.target.value)}></textarea><MessageSquare className="absolute right-3 bottom-3 text-[#87898d]" size={20} /></div></div>
-                                <button onClick={handleSave} className="w-full py-4 bg-[#0b4d9a] hover:bg-[#084b9a] text-white rounded-xl font-bold text-lg shadow-md active:scale-95 transition-all flex justify-center gap-2 items-center"><Save size={20} /> Guardar Cambios</button>
+
+                        {canEditStatus && (
+                            <div className="bg-white rounded-[2rem] shadow-lg border border-blue-100 p-6 md:p-8">
+                                <h3 className="font-bold text-[#0b4d9a] text-lg mb-6 flex items-center gap-2 pb-4 border-b border-gray-100"><Wrench size={24}/> Panel de Gestión</h3>
+                                {canAssign && (
+                                    <div className="mb-6">
+                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Asignar Técnico</label>
+                                        <select className="w-full p-4 border-2 border-gray-200 rounded-xl bg-gray-50 font-medium focus:border-[#0b4d9a] outline-none transition-colors" value={assignTo} onChange={e=>setAssignTo(e.target.value)}>
+                                            <option value="">-- Seleccionar Técnico --</option>
+                                            {assignableUsers.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+                                <div className="mb-6">
+                                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Actualizar Estatus</label>
+                                    <div className="flex gap-3">
+                                        {['abierto','en_proceso','resuelto'].map(s=>(
+                                            <button key={s} onClick={()=>setStatus(s)} className={`flex-1 py-3 rounded-xl border-2 text-sm font-bold uppercase transition-all ${status===s ? (s==='resuelto'?'bg-green-500 text-white border-green-500': s==='en_proceso'?'bg-yellow-400 text-white border-yellow-400':'bg-red-500 text-white border-red-500') : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300'}`}>{s.replace('_',' ')}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="mb-6">
+                                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Agregar Bitácora</label>
+                                    <textarea className="w-full p-4 border-2 border-gray-200 rounded-xl h-24 bg-gray-50 focus:bg-white focus:border-[#0b4d9a] outline-none" placeholder="Describe el avance o solución..." value={followUp} onChange={e=>setFollowUp(e.target.value)}></textarea>
+                                </div>
+                                <button onClick={handleSave} className="w-full bg-[#f5851f] text-white font-bold text-lg py-4 rounded-xl shadow-lg hover:bg-[#d97317] transition-all">Guardar Cambios</button>
                             </div>
-                        </div>
-                        {ticket.history && ticket.history.length > 0 && (
-                            <div className="mb-12">
-                                <h3 className="text-[#87898d] text-xs font-bold uppercase mb-4 ml-2">Historial de Seguimiento</h3>
+                        )}
+
+                        {ticket.history?.length > 0 && (
+                            <div className="pb-10">
+                                <h4 className="font-bold text-gray-400 text-xs uppercase mb-4 ml-2 tracking-wider">Historial de Movimientos</h4>
                                 <div className="space-y-3">
-                                    {ticket.history.map((h, idx) => (
-                                        <div key={idx} className="bg-white p-4 rounded-xl border border-[#e5e7eb] shadow-sm flex gap-3"><div className="mt-1 text-[#0b4d9a]"><Clock size={16} /></div><p className="text-[#87898d] text-sm">{h}</p></div>
+                                    {ticket.history.map((h,i)=>(
+                                        <div key={i} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex gap-4 items-start">
+                                            <div className="mt-1 text-[#0b4d9a] bg-blue-50 p-2 rounded-full"><Clock size={16} /></div>
+                                            <p className="text-gray-600 text-sm leading-relaxed pt-1">{h}</p>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
@@ -447,112 +625,78 @@
             );
         };
 
-        const DashboardScreen = ({ incidents, mode, onBack, onUpdateStatus }) => {
-            const isReadOnly = mode === 'status'; 
-            const [filterStatus, setFilterStatus] = useState('all');
-            const [filterCategory, setFilterCategory] = useState('all');
+        const DashboardScreen = ({ incidents, mode, onBack, onUpdateStatus, onAssign, user, assignableUsers }) => {
             const [selectedTicket, setSelectedTicket] = useState(null);
-
-            const filteredIncidents = incidents.filter(ticket => {
-                const matchStatus = filterStatus === 'all' || ticket.status === filterStatus;
-                const matchCategory = filterCategory === 'all' || ticket.category?.id === filterCategory;
-                return matchStatus && matchCategory;
-            });
-
-            const getStatusBadge = (status) => {
-                const styles = {
-                    abierto: 'bg-red-100 text-red-700 border-red-200',
-                    en_proceso: 'bg-[#fff7ed] text-[#f5851f] border-[#fed7aa]', 
-                    resuelto: 'bg-green-100 text-green-700 border-green-200'
-                };
-                return <span className={`px-3 py-1 rounded-full text-[10px] font-black border uppercase tracking-wider ${styles[status] || 'bg-slate-100'}`}>{status.replace('_', ' ')}</span>;
-            };
-
-            if (selectedTicket) {
-                return (
-                    <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                        <Header title="Gestión de Reporte" subtitle="Detalle y Seguimiento" showHome={false} />
-                        <TicketDetailView ticket={selectedTicket} onBack={() => setSelectedTicket(null)} onSaveUpdate={(id, status, note) => { onUpdateStatus(id, status, note); setSelectedTicket(null); }} />
-                    </div>
-                );
-            }
+            if (selectedTicket) return <TicketDetailView ticket={selectedTicket} onBack={()=>setSelectedTicket(null)} onSaveUpdate={onUpdateStatus} onAssign={onAssign} user={user} assignableUsers={assignableUsers} />;
 
             return (
                 <div className="min-h-screen bg-[#f3f4f6] flex flex-col">
-                    <Header title={isReadOnly ? 'Estatus de Reportes' : 'Administración'} subtitle="Listado General" onBack={onBack} onHome={onBack} />
-                    <div className="flex-1 flex flex-col p-4 md:p-6 max-w-6xl mx-auto w-full h-screen overflow-hidden">
-                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-[#e5e7eb] mb-4 flex flex-col md:flex-row gap-4 items-center sticky top-0 z-10">
-                            <div className="flex items-center gap-2 text-[#084b9a] font-bold mr-auto"><Filter size={20} /> Filtros</div>
-                            <div className="w-full md:w-auto flex gap-2 overflow-x-auto">
-                                <div className="relative min-w-[150px]">
-                                    <select className="w-full p-2 pl-3 pr-8 bg-[#f8f9fa] border border-[#e5e7eb] rounded-lg text-sm font-bold text-[#87898d] appearance-none outline-none focus:border-[#0b4d9a]" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-                                        <option value="all">Todos los Estatus</option><option value="abierto">Abierto</option><option value="en_proceso">En Proceso</option><option value="resuelto">Resuelto</option>
-                                    </select>
-                                    <ChevronDown className="absolute right-2 top-2.5 text-[#87898d] pointer-events-none" size={16} />
-                                </div>
-                                <div className="relative min-w-[180px]">
-                                    <select className="w-full p-2 pl-3 pr-8 bg-[#f8f9fa] border border-[#e5e7eb] rounded-lg text-sm font-bold text-[#87898d] appearance-none outline-none focus:border-[#0b4d9a]" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-                                        <option value="all">Todas las Categorías</option>
-                                        {INCIDENT_CATALOG.map(cat => (<option key={cat.id} value={cat.id}>{cat.label}</option>))}
-                                    </select>
-                                    <ChevronDown className="absolute right-2 top-2.5 text-[#87898d] pointer-events-none" size={16} />
-                                </div>
+                    <Header title={mode === 'status' ? 'Mis Reportes' : 'Administración'} subtitle="Listado General" onBack={onBack} user={user} />
+                    <div className="flex-1 p-4 max-w-5xl mx-auto w-full overflow-y-auto pb-20">
+                        {incidents.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                                <div className="bg-white p-6 rounded-full shadow-sm mb-4"><LayoutGrid size={48} className="opacity-20"/></div>
+                                <p className="font-medium">No hay reportes para mostrar</p>
                             </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto space-y-3 pb-20">
-                            {filteredIncidents.map(ticket => (
-                                <div key={ticket.id} onClick={() => setSelectedTicket(ticket)} className="bg-white rounded-xl border border-[#e5e7eb] shadow-sm hover:shadow-md hover:border-[#0b4d9a] transition-all cursor-pointer group">
-                                    <div className="flex items-center p-4">
-                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center mr-4 flex-shrink-0 ${ticket.category?.color || 'bg-slate-100 text-[#87898d]'}`}>{ticket.category.icon && <ticket.category.icon size={24} />}</div>
+                        ) : (
+                            <div className="space-y-4">
+                                {incidents.map(ticket => (
+                                    <div key={ticket.id} onClick={()=>setSelectedTicket(ticket)} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-5 cursor-pointer hover:border-[#0b4d9a] hover:shadow-md transition-all group">
+                                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-inner ${ticket.category?.color || 'bg-gray-100'}`}>{ticket.category?.icon && <ticket.category.icon size={28} />}</div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <div className="flex items-center gap-2"><span className="font-black text-lg text-[#084b9a]">Unidad {ticket.unitNumber}</span><span className="text-xs font-bold text-[#87898d] px-2 py-0.5 bg-[#f3f4f6] rounded">{ticket.companyName}</span></div>
-                                                <div className="md:hidden">{getStatusBadge(ticket.status)}</div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-black text-lg text-[#084b9a]">Unidad {ticket.unitNumber}</span>
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase border ${ticket.status==='abierto'?'text-red-600 border-red-100 bg-red-50':'text-green-600 border-green-100 bg-green-50'}`}>{ticket.status}</span>
                                             </div>
-                                            <p className="text-[#87898d] text-sm truncate flex items-center gap-2"><span>{ticket.subcategory?.icon}</span><span className="font-medium">{ticket.subcategory?.label}</span><span className="text-slate-300 mx-1">•</span><span className="text-[#88898d] italic truncate">{ticket.notes}</span></p>
+                                            <p className="text-sm font-bold text-gray-700 flex items-center gap-2 truncate"><span>{ticket.subcategory?.icon}</span> {ticket.subcategory?.label}</p>
+                                            <p className="text-xs text-gray-400 mt-1 truncate">Creado: {ticket.created_at?.substring(0,10)}</p>
                                         </div>
-                                        <div className="hidden md:flex flex-col items-end ml-4 pl-4 border-l border-[#e5e7eb] min-w-[120px]"><div className="mb-2">{getStatusBadge(ticket.status)}</div><span className="text-xs text-[#87898d] font-medium">{ticket.created_at ? ticket.created_at.substring(0,10) : 'N/A'}</span></div>
-                                        <div className="ml-3 text-[#e5e7eb] group-hover:text-[#f5851f] group-hover:translate-x-1 transition-all"><ChevronRight size={24} /></div>
+                                        <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-[#0b4d9a] group-hover:text-white transition-colors">
+                                            <ChevronRight size={18} />
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                            {filteredIncidents.length === 0 && (<div className="py-12 flex flex-col items-center justify-center text-[#87898d]"><LayoutGrid size={64} className="mb-4 opacity-20" /><p className="text-lg font-medium">No se encontraron reportes con los filtros actuales</p></div>)}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             );
         };
 
         const App = () => {
-            const [view, setView] = useState('welcome'); 
+            const [user, setUser] = useState(null);
+            const [view, setView] = useState('login'); 
             const [catalogs, setCatalogs] = useState({ units: [], operators: [], companies: [] });
             const [incidents, setIncidents] = useState([]);
-            const [incidentCatalog, setIncidentCatalog] = useState([]); 
+            const [incidentCatalog, setIncidentCatalog] = useState([]);
+            const [assignableUsers, setAssignableUsers] = useState([]);
 
-            const loadData = async () => {
-                const cats = await ApiService.fetchCatalogs();
-                const dynCat = await ApiService.fetchDynamicCatalog(); 
-                const incs = await ApiService.fetchIncidents(dynCat); 
-                setCatalogs(cats);
-                setIncidentCatalog(dynCat);
-                setIncidents(incs);
-            };
+            useEffect(() => {
+                if (user) {
+                    const loadData = async () => {
+                        const cats = await ApiService.fetchCatalogs();
+                        const dynCat = await ApiService.fetchDynamicCatalog(); 
+                        const incs = await ApiService.fetchIncidents(dynCat, user);
+                        const aUsers = await ApiService.fetchAssignableUsers();
+                        setCatalogs(cats); setIncidentCatalog(dynCat); setIncidents(incs); setAssignableUsers(aUsers);
+                    };
+                    loadData(); setView('menu');
+                }
+            }, [user]);
 
-            useEffect(() => { loadData(); }, [view]);
+            const handleCreate = async (data) => { await ApiService.createIncident(data); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); setView('menu'); };
+            const handleStatusUpdate = async (id, status, note) => { await ApiService.updateStatus(id, status, note); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); };
+            const handleAssign = async (data) => { await ApiService.assignIncident(data); const incs = await ApiService.fetchIncidents(incidentCatalog, user); setIncidents(incs); };
 
-            const handleCreate = async (data) => { await ApiService.createIncident(data); setView('menu'); };
-            const handleStatusUpdate = async (id, status, note) => { await ApiService.updateStatus(id, status, note); loadData(); };
+            if (!user) return <LoginScreen onLogin={setUser} />;
 
             return (
                 <React.Fragment>
-                    {view === 'welcome' && <WelcomeScreen onStart={() => setView('menu')} />}
-                    {view === 'menu' && <MainMenu onNavigate={(target) => setView(target === 'admin' ? 'admin_menu' : target)} />}
-                    {view === 'create' && <CreateTicket onCancel={() => setView('menu')} onSubmit={handleCreate} catalogs={catalogs} incidentCatalog={incidentCatalog} />}
-                    {view === 'status' && <DashboardScreen mode="status" incidents={incidents} onBack={() => setView('menu')} onUpdateStatus={handleStatusUpdate} />}
-                    {/* Rutas de Administración */}
+                    {view === 'menu' && <MainMenu user={user} onNavigate={(t) => t === 'logout' ? setUser(null) : setView(t)} />}
+                    {view === 'create' && <CreateTicket user={user} onCancel={() => setView('menu')} onSubmit={handleCreate} catalogs={catalogs} incidentCatalog={incidentCatalog} />}
+                    {(view === 'status' || view === 'admin_dashboard') && <DashboardScreen mode={view} incidents={incidents} onBack={() => setView(view==='status'?'menu':'admin_menu')} onUpdateStatus={handleStatusUpdate} onAssign={handleAssign} user={user} assignableUsers={assignableUsers} />}
                     {view === 'admin_menu' && <AdminMenu onNavigate={setView} />}
-                    {view === 'admin_dashboard' && <DashboardScreen mode="admin" incidents={incidents} onBack={() => setView('admin_menu')} onUpdateStatus={handleStatusUpdate} />}
-                    {view === 'admin_catalog' && (<><Header title="Configurar Catálogos" subtitle="Administración" onBack={() => setView('admin_menu')} showHome={false} /><CatalogConfig catalog={incidentCatalog} onReload={loadData} /></>)}
+                    {view === 'admin_catalog' && (<><Header title="Configuración" subtitle="Catálogos" onBack={() => setView('admin_menu')} user={user} showHome={false} /><CatalogConfig catalog={incidentCatalog} onReload={async ()=>{ const c = await ApiService.fetchDynamicCatalog(); setIncidentCatalog(c); }} /></>)}
                 </React.Fragment>
             );
         };
